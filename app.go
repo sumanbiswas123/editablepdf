@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -208,28 +209,12 @@ window.addEventListener('message', function(e) {
   // 2. Clone document natively (since slides use standard DOM and jQuery UI)
   var docClone = document.documentElement.cloneNode(true);
 
-  // 3. Hide standard background elements inside the cloned DOM surgically
-  var clonedPopup = null;
+  // 3. Tag active popup surgically so the backend screenshot engine can identify and isolate it in the clone
   if (topActivePopup) {
-    // Tag active popup to trace it in the clone
     topActivePopup.setAttribute('data-pdf-active-popup', 'true');
     var freshClone = document.documentElement.cloneNode(true);
     topActivePopup.removeAttribute('data-pdf-active-popup');
-    
     docClone = freshClone;
-    clonedPopup = docClone.querySelector('[data-pdf-active-popup="true"]');
-
-    // Locate standard slide background containers
-    var contentFrame = docClone.querySelector('#contentFrame, .contentFrame, .mainContent, #slideContent, #slide-content, .slide-content');
-    if (contentFrame && clonedPopup) {
-      // Query only foreground text/component tags to hide leaking texts,
-      // completely sparing <img> elements (like whitebg, pageimg) so slide background graphics are fully preserved!
-      contentFrame.querySelectorAll('div, p, span, a, h1, h2, h3, h4, h5, h6, li').forEach(function(el) {
-        if (!clonedPopup.contains(el)) {
-          el.style.visibility = 'hidden';
-        }
-      });
-    }
   }
 
   // 4. Inject helper span ONLY into cloned document (preserving justification spacing fix!)
@@ -538,7 +523,9 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 
 		// Execute page loading, locking 1024x768 viewport, and printing to PDF
 		var buf []byte
-		err = chromedp.Run(ctx,
+		var screenshotBuf []byte
+
+		actions := []chromedp.Action{
 			// Force screen media emulation to render screen-specific layouts, fonts, backgrounds, and pseudo-elements
 			emulation.SetEmulatedMedia().WithMedia("screen"),
 			// Lock viewport to 1024x768 to prevent layout shifts
@@ -551,7 +538,125 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 			// Wait for body to be loaded
 			chromedp.WaitReady("body"),
 			// Settle time for custom transitions or web fonts
-			chromedp.Sleep(time.Duration(sleepMs)*time.Millisecond),
+			chromedp.Sleep(time.Duration(sleepMs) * time.Millisecond),
+		}
+
+		// If a dynamic popup state is captured, we surgically flatten `#contentFrame` to a high-res screenshot
+		// Handles 3 scenarios:
+		//   1. No popup (CustomHTML == "") → fully editable vector PDF (this block is skipped entirely)
+		//   2. CustomHTML set but no visible popups (user closed popup before saving) → also fully editable
+		//   3. One popup open → screenshot #contentFrame as flat background, popup stays editable
+		//   4. Layered popups (shared over slide popup) → screenshot #contentFrame, hide ALL lower popups,
+		//      only the TOPMOST popup remains editable
+		if job.CustomHTML != "" {
+			actions = append(actions,
+				// 1. Detect visible popups. If NONE are visible, mark flag to skip flattening.
+				//    If popups ARE visible: save original display values, hide them all for clean screenshot.
+				chromedp.Evaluate(`(function() {
+					var dialogs = Array.from(document.querySelectorAll('.ui-dialog')).filter(function(d) {
+						var cs = window.getComputedStyle(d);
+						return cs.display !== 'none' && cs.visibility !== 'hidden';
+					});
+
+					// NO visible popups → skip flattening, render as fully editable vector PDF
+					if (dialogs.length === 0) {
+						window._pdfSkipFlatten = true;
+						return 0;
+					}
+					window._pdfSkipFlatten = false;
+
+					// Sort by z-index descending so [0] = topmost
+					dialogs.sort(function(a, b) {
+						return (parseInt(window.getComputedStyle(b).zIndex) || 0) -
+						       (parseInt(window.getComputedStyle(a).zIndex) || 0);
+					});
+
+					// Save original display and hide the TOPMOST popup (will be restored as editable)
+					dialogs[0].setAttribute('data-pdf-topmost', 'true');
+					dialogs[0].setAttribute('data-pdf-orig-display', dialogs[0].style.display || '');
+					dialogs[0].style.setProperty('display', 'none', 'important');
+
+					// Save and hide ALL lower popups (stay hidden permanently - no text bleed)
+					for (var i = 1; i < dialogs.length; i++) {
+						dialogs[i].setAttribute('data-pdf-lower-popup', 'true');
+						dialogs[i].setAttribute('data-pdf-orig-display', dialogs[i].style.display || '');
+						dialogs[i].style.setProperty('display', 'none', 'important');
+					}
+
+					// Save and hide ALL jQuery UI backdrop overlays for clean screenshot
+					document.querySelectorAll('.ui-widget-overlay').forEach(function(o, idx) {
+						o.setAttribute('data-pdf-overlay', 'true');
+						o.setAttribute('data-pdf-orig-display', o.style.display || '');
+						o.style.setProperty('display', 'none', 'important');
+					});
+
+					return dialogs.length;
+				})()`, nil),
+
+				// 2. Screenshot #contentFrame (only if popups were found)
+				chromedp.ActionFunc(func(ctx context.Context) error {
+					// Check if we should skip flattening
+					var skip bool
+					if err := chromedp.Evaluate(`window._pdfSkipFlatten === true`, &skip).Do(ctx); err != nil {
+						return err
+					}
+					if skip {
+						return nil // No visible popups → skip screenshot, keep fully editable
+					}
+					// Take screenshot of clean #contentFrame
+					return chromedp.Screenshot("#contentFrame", &screenshotBuf, chromedp.ByID).Do(ctx)
+				}),
+
+				// 3. If popups exist: flatten #contentFrame → screenshot image, restore ONLY topmost popup
+				chromedp.ActionFunc(func(ctx context.Context) error {
+					// Check skip flag again
+					var skip bool
+					if err := chromedp.Evaluate(`window._pdfSkipFlatten === true`, &skip).Do(ctx); err != nil {
+						return err
+					}
+					if skip {
+						return nil // Fully editable → do nothing
+					}
+
+					base64Str := "data:image/png;base64," + base64.StdEncoding.EncodeToString(screenshotBuf)
+					jsScript := fmt.Sprintf(`(function() {
+						// Flatten #contentFrame to screenshot image
+						var cf = document.querySelector("#contentFrame");
+						if (cf) {
+							cf.innerHTML = '<img src="%s" style="width:100%%; height:100%%; object-fit:cover; margin:0; padding:0; border:none; display:block;" />';
+						}
+
+						// Restore ONLY the topmost popup with its ORIGINAL display value
+						var topmost = document.querySelector('[data-pdf-topmost="true"]');
+						if (topmost) {
+							var origDisplay = topmost.getAttribute('data-pdf-orig-display') || 'block';
+							topmost.style.display = origDisplay || 'block';
+							topmost.removeAttribute('data-pdf-topmost');
+							topmost.removeAttribute('data-pdf-orig-display');
+						}
+
+						// Restore the LAST overlay backdrop (for topmost popup's visual dimming)
+						var overlays = Array.from(document.querySelectorAll('[data-pdf-overlay="true"]'));
+						if (overlays.length > 0) {
+							var lastOverlay = overlays[overlays.length - 1];
+							var origDisplay = lastOverlay.getAttribute('data-pdf-orig-display') || 'block';
+							lastOverlay.style.display = origDisplay || 'block';
+							lastOverlay.removeAttribute('data-pdf-overlay');
+							lastOverlay.removeAttribute('data-pdf-orig-display');
+						}
+
+						// Lower popups stay display:none — text fully suppressed
+						// Lower overlays stay display:none — no stacking artifacts
+						return "restored";
+					})()`, base64Str)
+					var res string
+					return chromedp.Evaluate(jsScript, &res).Do(ctx)
+				}),
+			)
+		}
+
+		// Finally, add the PrintToPDF printing action to the pipeline
+		actions = append(actions,
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				var err error
 				// Print to 10.66 x 8.00 in (perfect 1024x768px at 96 DPI aspect ratio) with zero margins
@@ -568,6 +673,8 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 				return err
 			}),
 		)
+
+		err = chromedp.Run(ctx, actions...)
 
 		// Clean up temporary HTML file immediately after render
 		if tempFile != "" {
