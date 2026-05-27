@@ -9,7 +9,9 @@ import {
   ListCompiledPDFs,
   DeleteCompiledPDF,
   CompileSlidesToIDML,
-  SelectIDMLSavePath
+  SelectIDMLSavePath,
+  ListCombinedDecks,
+  CombineCompiledPDFs
 } from '../wailsjs/go/main/App';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
@@ -20,6 +22,8 @@ let state = {
   slides: [],
   currentSlideIndex: -1,
   compiledPDFs: [],
+  combinedDecks: [],
+  currentViewerPDFIndex: -1,
   isCompiling: false,
   sleepMs: 800
 };
@@ -78,14 +82,36 @@ document.querySelector('#app').innerHTML = `
       </div>
     </div>
 
-    <!-- Right Panel: Compiled PDFs -->
-    <div class="panel-right">
-      <div class="panel-header">
-        Compiled PDFs
-        <span class="count-badge" id="pdf-count">0</span>
+    <!-- Right Panel: Compiled PDFs & Combined Decks -->
+    <div class="panel-right" style="display: flex; flex-direction: column; height: 100%;">
+      <!-- Compiled PDFs (Single Slides) -->
+      <div style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding-bottom: 8px;">
+        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span>Compiled PDFs</span>
+          <span class="count-badge" id="pdf-count">0</span>
+        </div>
+        <div class="pdf-list" id="pdf-list" style="flex: 1; overflow-y: auto;">
+          <div class="pdf-empty">No PDFs compiled yet.<br/>Compile slides to see them here.</div>
+        </div>
       </div>
-      <div class="pdf-list" id="pdf-list">
-        <div class="pdf-empty">No PDFs compiled yet.<br/>Compile slides to see them here.</div>
+
+      <!-- Divider line -->
+      <div style="height: 1px; background: var(--border-color); margin: 4px 0; opacity: 0.5;"></div>
+
+      <!-- Combined Decks -->
+      <div style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 8px;">
+        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span>Combined Decks</span>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="compile-btn" id="btn-combine-pdf" style="padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; color: #080c14; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 4px 12px rgba(0, 242, 254, 0.2); transition: all 0.2s; height: 26px; line-height: 26px;" disabled>
+              🔗 Combine
+            </button>
+            <span class="count-badge" id="deck-count">0</span>
+          </div>
+        </div>
+        <div class="pdf-list" id="deck-list" style="flex: 1; overflow-y: auto;">
+          <div class="pdf-empty">No combined decks created yet.</div>
+        </div>
       </div>
     </div>
   </div>
@@ -162,6 +188,9 @@ const btnPrev = document.querySelector('#btn-prev');
 const btnNext = document.querySelector('#btn-next');
 const pdfList = document.querySelector('#pdf-list');
 const pdfCount = document.querySelector('#pdf-count');
+const btnCombinePdf = document.querySelector('#btn-combine-pdf');
+const deckCount = document.querySelector('#deck-count');
+const deckList = document.querySelector('#deck-list');
 const pdfViewer = document.querySelector('#pdf-viewer');
 const pdfViewerTitleText = document.querySelector('#pdf-viewer-title-text');
 const pdfViewerFrame = document.querySelector('#pdf-viewer-frame');
@@ -470,14 +499,140 @@ function setCompileUIState(compiling) {
 // ─── PDF List Management ─────────────────────────────────────────────────────
 async function refreshPDFList() {
   try {
+    // 1. Load single slide PDFs
     const pdfs = await ListCompiledPDFs();
     state.compiledPDFs = pdfs;
     pdfCount.innerText = pdfs.length;
     renderPDFList();
+
+    // 2. Load combined decks
+    const decks = await ListCombinedDecks();
+    state.combinedDecks = decks;
+    deckCount.innerText = decks.length;
+    renderCombinedDeckList();
+
+    // 3. Toggle Combine button availability
+    if (pdfs.length > 1) {
+      btnCombinePdf.removeAttribute('disabled');
+    } else {
+      btnCombinePdf.setAttribute('disabled', 'true');
+    }
   } catch (err) {
     console.error('Failed to list PDFs:', err);
   }
 }
+
+// Self-healing fallback: aggressively ensure the Combine button is unlocked ONLY if 2 or more slide PDFs exist (>= 2)
+setInterval(() => {
+  const items = document.querySelectorAll('#pdf-list .pdf-item');
+  const btn = document.querySelector('#btn-combine-pdf');
+  if (btn) {
+    if (items.length > 1 || (state.compiledPDFs && state.compiledPDFs.length > 1)) {
+      btn.removeAttribute('disabled');
+    } else {
+      btn.setAttribute('disabled', 'true');
+    }
+  }
+}, 500);
+
+function renderCombinedDeckList() {
+  if (state.combinedDecks.length === 0) {
+    deckList.innerHTML = '<div class="pdf-empty">No combined decks created yet.</div>';
+    return;
+  }
+  
+  deckList.innerHTML = '';
+  state.combinedDecks.forEach((pdf) => {
+    const item = document.createElement('div');
+    item.className = 'pdf-item';
+    item.style.borderLeft = '3px solid #00f2fe';
+    
+    const sizeStr = formatFileSize(pdf.size);
+    
+    item.innerHTML = `
+      <div class="pdf-item-icon">📚</div>
+      <div class="pdf-item-info">
+        <div class="pdf-item-name" style="font-weight: 600; color: #00f2fe; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${pdf.name}</div>
+        <div class="pdf-item-meta">${sizeStr}</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center; z-index: 10;">
+        <button class="pdf-item-info-btn" title="View PDF Metadata" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); font-size: 0.95rem; cursor: pointer; padding: 6px; border-radius: 8px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; color: var(--text-muted);">ℹ️</button>
+        <button class="pdf-item-delete" title="Delete">🗑️</button>
+      </div>
+    `;
+    
+    // Hover effects for the info button
+    const infoBtn = item.querySelector('.pdf-item-info-btn');
+    infoBtn.addEventListener('mouseenter', () => {
+      infoBtn.style.background = 'rgba(0, 242, 254, 0.15)';
+      infoBtn.style.color = '#00f2fe';
+    });
+    infoBtn.addEventListener('mouseleave', () => {
+      infoBtn.style.background = 'rgba(255,255,255,0.05)';
+      infoBtn.style.color = 'var(--text-muted)';
+    });
+
+    // Click to view PDF
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.pdf-item-delete') || e.target.closest('.pdf-item-info-btn')) return;
+      openPDFViewer(pdf);
+    });
+
+    // Info button click
+    infoBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMetadataModal(pdf);
+    });
+    
+    // Delete button (optimistic UI update!)
+    item.querySelector('.pdf-item-delete').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        state.combinedDecks = state.combinedDecks.filter(p => p.name !== pdf.name);
+        deckCount.innerText = state.combinedDecks.length;
+        renderCombinedDeckList();
+
+        await DeleteCompiledPDF(pdf.name);
+        
+        setTimeout(async () => {
+          await refreshPDFList();
+        }, 150);
+      } catch (err) {
+        console.error('Failed to delete combined PDF:', err);
+        await refreshPDFList();
+      }
+    });
+    
+    deckList.appendChild(item);
+  });
+}
+
+// ─── PDF Combination Event Listener ─────────────────────────────────────────
+btnCombinePdf.addEventListener('click', async () => {
+  try {
+    setCompileUIState(true);
+    progressStatusText.innerHTML = '🔗 Combining all compiled slide PDFs into a single full deck...';
+    progressIndicator.style.width = '45%';
+    progressPercentage.innerText = '45%';
+
+    await CombineCompiledPDFs();
+
+    progressStatusText.innerHTML = '🎉 Full presentation deck combined successfully!';
+    progressPercentage.innerText = '100%';
+    progressIndicator.style.width = '100%';
+    progressIndicator.style.background = 'var(--accent-green)';
+
+    setTimeout(async () => {
+      setCompileUIState(false);
+      await refreshPDFList();
+    }, 1500);
+  } catch (err) {
+    console.error('Failed to combine PDFs:', err);
+    progressStatusText.innerHTML = `❌ Combination failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
+    progressIndicator.style.background = 'var(--accent-pink)';
+    setCompileUIState(false);
+  }
+});
 
 function renderPDFList() {
   if (state.compiledPDFs.length === 0) {

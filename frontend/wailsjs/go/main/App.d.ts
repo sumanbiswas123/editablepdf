@@ -12,6 +12,8 @@ export function CleanUpServer():Promise<void>;
 
 export function CleanUpTempHTML(arg1:string,arg2:string):Promise<void>;
 
+export function CombineCompiledPDFs():Promise<string>;
+
 export function CompileScreenshot(arg1:main.ExportJob,arg2:string,arg3:number):Promise<string>;
 
 export function CompileSlidesToIDML(arg1:Array<main.ExportJob>,arg2:string,arg3:number):Promise<string>;
@@ -29,6 +31,10 @@ export function GenerateDeckAutoSavePath():Promise<string>;
 export function GenerateNextSequentialPDFPath():Promise<string>;
 
 export function GetOutputDir():Promise<string>;
+
+export function IsSingleSlidePDF(arg1:string):Promise<boolean>;
+
+export function ListCombinedDecks():Promise<Array<main.CompiledPDF>>;
 
 export function ListCompiledPDFs():Promise<Array<main.CompiledPDF>>;
 

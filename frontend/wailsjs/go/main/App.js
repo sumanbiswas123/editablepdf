@@ -22,6 +22,10 @@ export function CleanUpTempHTML(arg1, arg2) {
   return window['go']['main']['App']['CleanUpTempHTML'](arg1, arg2);
 }
 
+export function CombineCompiledPDFs() {
+  return window['go']['main']['App']['CombineCompiledPDFs']();
+}
+
 export function CompileScreenshot(arg1, arg2, arg3) {
   return window['go']['main']['App']['CompileScreenshot'](arg1, arg2, arg3);
 }
@@ -56,6 +60,14 @@ export function GenerateNextSequentialPDFPath() {
 
 export function GetOutputDir() {
   return window['go']['main']['App']['GetOutputDir']();
+}
+
+export function IsSingleSlidePDF(arg1) {
+  return window['go']['main']['App']['IsSingleSlidePDF'](arg1);
+}
+
+export function ListCombinedDecks() {
+  return window['go']['main']['App']['ListCombinedDecks']();
 }
 
 export function ListCompiledPDFs() {

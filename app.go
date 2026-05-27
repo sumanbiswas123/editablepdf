@@ -563,6 +563,155 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 			chromedp.Sleep(time.Duration(sleepMs) * time.Millisecond),
 		}
 
+		// Set document title with JSON metadata of slide/popup details so Chrome embeds it into PDF metadata
+		presentationId := filepath.Base(a.currentDir)
+		timestampStr := time.Now().Format(time.RFC3339)
+		actions = append(actions,
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				jsScript := fmt.Sprintf(`(function() {
+					function getActivePopups() {
+						var selectors = ['.ui-dialog', '#customMenuWrapper', '#flowSelector', '#fragmentSelector', '#pi', '#references', '#ref', '#isi', '#si', '#email', '#mail', '#bi', '#mainpopup'];
+						var dialogs = Array.from(document.querySelectorAll(selectors.join(', '))).filter(function(d) {
+							var cs = window.getComputedStyle(d);
+							if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+							var rect = d.getBoundingClientRect();
+							if (rect.width <= 150 || rect.height <= 150) return false;
+							var isInViewport = rect.left < window.innerWidth && rect.right > 0 && rect.top < window.innerHeight && rect.bottom > 0;
+							if (!isInViewport) return false;
+							if (d.classList.contains('inactive') || d.classList.contains('hidden')) return false;
+							return true;
+						});
+						function getActiveScore(el) {
+							var score = 0;
+							var cls = el.className.toLowerCase();
+							var id = el.id.toLowerCase();
+							if (cls.includes('activenav') || cls.includes('active-nav') || id.includes('activenav')) {
+								score += 5000000;
+							}
+							if (cls.includes('active') || id.includes('active')) {
+								score += 2000000;
+							}
+							if (cls.includes('open') || cls.includes('show') || cls.includes('visible') || id.includes('open') || id.includes('show') || id.includes('visible')) {
+								score += 1000000;
+							}
+							if (cls.includes('inactive') || cls.includes('hidden') || cls.includes('close') || id.includes('inactive') || id.includes('hidden') || id.includes('close')) {
+								score -= 10000000;
+							}
+							return score;
+						}
+						dialogs.sort(function(a, b) {
+							var scoreA = getActiveScore(a);
+							var scoreB = getActiveScore(b);
+							if (scoreA !== scoreB) return scoreB - scoreA;
+							var zA = parseInt(window.getComputedStyle(a).zIndex) || 0;
+							var zB = parseInt(window.getComputedStyle(b).zIndex) || 0;
+							if (zA !== zB) return zB - zA;
+							var allElements = Array.from(document.querySelectorAll('*'));
+							return allElements.indexOf(b) - allElements.indexOf(a);
+						});
+						return dialogs;
+					}
+
+					var dialogs = getActivePopups();
+
+					var metadata = {
+						presentationId: %q,
+						slideName: %q,
+						folderName: %q,
+						type: "slide",
+						timestamp: %q
+					};
+
+					if (dialogs.length > 0) {
+						var openPopups = dialogs.map(function(d) {
+							var type = "slide_popup";
+							var id = d.id || "";
+							var cls = d.className || "";
+							
+							// Target ONLY the immediate jQuery UI dialog content element to extract the exact container ID/class
+							var innerContent = d.querySelector('.ui-dialog-content');
+							if (innerContent) {
+								id = innerContent.id || "";
+								cls = innerContent.className || "";
+							}
+							
+							var lowerId = id.toLowerCase();
+							var lowerCls = cls.toLowerCase();
+							
+							// Check if it is a shared popup
+							if (lowerId === 'custommenuwrapper' || lowerCls.includes('menu')) {
+								type = "menu";
+							} else if (lowerId === 'flowselector' || lowerCls.includes('flow')) {
+								type = "flow";
+							} else if (lowerId === 'fragmentselector' || lowerCls.includes('fragment')) {
+								type = "fragment";
+							} else if (lowerId.includes('ref') || lowerCls.includes('ref') || lowerId.includes('reference') || lowerCls.includes('reference') || d.querySelector('.refTitle, [class*="reftitle"], [class*="refTitle"]')) {
+								type = "ref";
+							} else if (lowerId.includes('pi') || lowerCls.includes('pi') || lowerId.includes('prescrib') || lowerCls.includes('prescrib') || d.querySelector('.piTitle, [class*="pititle"], [class*="piTitle"]')) {
+								type = "pi";
+							} else if (lowerId.includes('isi') || lowerCls.includes('isi') || lowerId.includes('safety') || lowerCls.includes('safety') || d.querySelector('.isiTitle, [class*="isititle"], [class*="isiTitle"]')) {
+								type = "isi";
+							} else if (lowerId.includes('si') || lowerCls.includes('si')) {
+								type = "si";
+							} else if (lowerId.includes('email') || lowerCls.includes('email') || lowerId.includes('mail') || lowerCls.includes('mail')) {
+								type = "email";
+							}
+
+							return {
+								id: id,
+								className: cls,
+								type: type,
+								zIndex: parseInt(window.getComputedStyle(d).zIndex) || 0
+							};
+						});
+
+						metadata.openPopups = openPopups;
+
+						// Topmost popup
+						var topmost = openPopups[0];
+						
+						// Determine type of compilation unit
+						var isSharedTopmost = ["menu", "flow", "fragment", "ref", "pi", "isi", "si", "email"].includes(topmost.type) || 
+						                      topmost.id === 'customMenuWrapper' || 
+						                      topmost.id === 'flowSelector' || 
+						                      topmost.id === 'fragmentSelector';
+
+						if (isSharedTopmost) {
+							// Find if there is a slide popup behind it (e.g., standard .ui-dialog or other non-shared popups)
+							var parentPopup = null;
+							for (var i = 1; i < openPopups.length; i++) {
+								if (openPopups[i].type === "slide_popup") {
+									parentPopup = openPopups[i];
+									break;
+								}
+							}
+
+							if (parentPopup) {
+								metadata.type = "shared_on_popup";
+								metadata.parentPopup = {
+									id: parentPopup.id,
+									className: parentPopup.className
+								};
+								metadata.sharedType = topmost.type;
+							} else {
+								metadata.type = "shared_on_slide";
+								metadata.sharedType = topmost.type;
+							}
+						} else {
+							metadata.type = "popup";
+							metadata.popupInfo = {
+								id: topmost.id,
+								className: topmost.className
+							};
+						}
+					}
+
+					document.title = JSON.stringify(metadata);
+				})()`, presentationId, strings.TrimPrefix(job.FolderName, "_"), job.FolderName, timestampStr)
+				return chromedp.Evaluate(jsScript, nil).Do(ctx)
+			}),
+		)
+
 		// If a dynamic popup state is captured, we surgically flatten `#contentFrame` to a high-res screenshot
 		// Handles 3 scenarios:
 		//   1. No popup (CustomHTML == "") → fully editable vector PDF (this block is skipped entirely)
@@ -575,10 +724,50 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 				// 1. Detect visible popups. If NONE are visible, mark flag to skip flattening.
 				//    If popups ARE visible: save original display values, hide them all for clean screenshot.
 				chromedp.Evaluate(`(function() {
-					var dialogs = Array.from(document.querySelectorAll('.ui-dialog, #customMenuWrapper, #flowSelector, #fragmentSelector')).filter(function(d) {
-						var cs = window.getComputedStyle(d);
-						return cs.display !== 'none' && cs.visibility !== 'hidden';
-					});
+					function getActivePopups() {
+						var selectors = ['.ui-dialog', '#customMenuWrapper', '#flowSelector', '#fragmentSelector', '#pi', '#references', '#ref', '#isi', '#si', '#email', '#mail', '#bi', '#mainpopup'];
+						var dialogs = Array.from(document.querySelectorAll(selectors.join(', '))).filter(function(d) {
+							var cs = window.getComputedStyle(d);
+							if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+							var rect = d.getBoundingClientRect();
+							if (rect.width <= 150 || rect.height <= 150) return false;
+							var isInViewport = rect.left < window.innerWidth && rect.right > 0 && rect.top < window.innerHeight && rect.bottom > 0;
+							if (!isInViewport) return false;
+							if (d.classList.contains('inactive') || d.classList.contains('hidden')) return false;
+							return true;
+						});
+						function getActiveScore(el) {
+							var score = 0;
+							var cls = el.className.toLowerCase();
+							var id = el.id.toLowerCase();
+							if (cls.includes('activenav') || cls.includes('active-nav') || id.includes('activenav')) {
+								score += 5000000;
+							}
+							if (cls.includes('active') || id.includes('active')) {
+								score += 2000000;
+							}
+							if (cls.includes('open') || cls.includes('show') || cls.includes('visible') || id.includes('open') || id.includes('show') || id.includes('visible')) {
+								score += 1000000;
+							}
+							if (cls.includes('inactive') || cls.includes('hidden') || cls.includes('close') || id.includes('inactive') || id.includes('hidden') || id.includes('close')) {
+								score -= 10000000;
+							}
+							return score;
+						}
+						dialogs.sort(function(a, b) {
+							var scoreA = getActiveScore(a);
+							var scoreB = getActiveScore(b);
+							if (scoreA !== scoreB) return scoreB - scoreA;
+							var zA = parseInt(window.getComputedStyle(a).zIndex) || 0;
+							var zB = parseInt(window.getComputedStyle(b).zIndex) || 0;
+							if (zA !== zB) return zB - zA;
+							var allElements = Array.from(document.querySelectorAll('*'));
+							return allElements.indexOf(b) - allElements.indexOf(a);
+						});
+						return dialogs;
+					}
+
+					var dialogs = getActivePopups();
 
 					// NO visible popups → skip flattening, render as fully editable vector PDF
 					if (dialogs.length === 0) {
@@ -586,12 +775,6 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 						return 0;
 					}
 					window._pdfSkipFlatten = false;
-
-					// Sort by z-index descending so [0] = topmost
-					dialogs.sort(function(a, b) {
-						return (parseInt(window.getComputedStyle(b).zIndex) || 0) -
-						       (parseInt(window.getComputedStyle(a).zIndex) || 0);
-					});
 
 					// Save original display and hide the TOPMOST popup (will be restored as editable)
 					dialogs[0].setAttribute('data-pdf-topmost', 'true');
@@ -686,113 +869,6 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 				}),
 			)
 		}
-
-		// Set document title with JSON metadata of slide/popup details so Chrome embeds it into PDF metadata
-		presentationId := filepath.Base(a.currentDir)
-		timestampStr := time.Now().Format(time.RFC3339)
-		actions = append(actions,
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				jsScript := fmt.Sprintf(`(function() {
-					var dialogs = Array.from(document.querySelectorAll('.ui-dialog, #customMenuWrapper, #flowSelector, #fragmentSelector, [id*="email"], [class*="email"], [id*="mail"], [class*="mail"], [class*="ref"], [id*="ref"], [class*="pi"], [id*="pi"], [class*="isi"], [id*="isi"]')).filter(function(d) {
-						var cs = window.getComputedStyle(d);
-						return cs.display !== 'none' && cs.visibility !== 'hidden';
-					});
-
-					// Sort by z-index descending so topmost is first
-					dialogs.sort(function(a, b) {
-						return (parseInt(window.getComputedStyle(b).zIndex) || 0) -
-						       (parseInt(window.getComputedStyle(a).zIndex) || 0);
-					});
-
-					var metadata = {
-						presentationId: %q,
-						slideName: %q,
-						folderName: %q,
-						type: "slide",
-						timestamp: %q
-					};
-
-					if (dialogs.length > 0) {
-						var openPopups = dialogs.map(function(d) {
-							var type = "slide_popup";
-							var id = d.id || "";
-							var cls = d.className || "";
-							var lowerId = id.toLowerCase();
-							var lowerCls = cls.toLowerCase();
-							
-							// Check if it is a shared popup
-							if (lowerId === 'custommenuwrapper' || lowerCls.includes('menu')) {
-								type = "menu";
-							} else if (lowerId === 'flowselector' || lowerCls.includes('flow')) {
-								type = "flow";
-							} else if (lowerId === 'fragmentselector' || lowerCls.includes('fragment')) {
-								type = "fragment";
-							} else if (lowerId.includes('ref') || lowerCls.includes('ref') || lowerId.includes('reference') || lowerCls.includes('reference')) {
-								type = "ref";
-							} else if (lowerId === 'pi' || lowerCls.split(/\\s+/).includes('pi') || lowerId.includes('pi-') || lowerCls.includes('pi-') || lowerId.includes('prescrib') || lowerCls.includes('prescrib')) {
-								type = "pi";
-							} else if (lowerId.includes('isi') || lowerCls.includes('isi') || lowerId.includes('safety') || lowerCls.includes('safety')) {
-								type = "isi";
-							} else if (lowerId === 'si' || lowerCls.split(/\\s+/).includes('si') || lowerId.includes('si-') || lowerCls.includes('si-')) {
-								type = "si";
-							} else if (lowerId.includes('email') || lowerCls.includes('email') || lowerId.includes('mail') || lowerCls.includes('mail')) {
-								type = "email";
-							}
-
-							return {
-								id: id,
-								className: cls,
-								type: type,
-								zIndex: parseInt(window.getComputedStyle(d).zIndex) || 0
-							};
-						});
-
-						metadata.openPopups = openPopups;
-
-						// Topmost popup
-						var topmost = openPopups[0];
-						
-						// Determine type of compilation unit
-						var isSharedTopmost = ["menu", "flow", "fragment", "ref", "pi", "isi", "si", "email"].includes(topmost.type) || 
-						                      topmost.id === 'customMenuWrapper' || 
-						                      topmost.id === 'flowSelector' || 
-						                      topmost.id === 'fragmentSelector';
-
-						if (isSharedTopmost) {
-							// Find if there is a slide popup behind it (e.g., standard .ui-dialog or other non-shared popups)
-							var parentPopup = null;
-							for (var i = 1; i < openPopups.length; i++) {
-								if (openPopups[i].type === "slide_popup") {
-									parentPopup = openPopups[i];
-									break;
-								}
-							}
-
-							if (parentPopup) {
-								metadata.type = "shared_on_popup";
-								metadata.parentPopup = {
-									id: parentPopup.id,
-									className: parentPopup.className
-								};
-								metadata.sharedType = topmost.type;
-							} else {
-								metadata.type = "shared_on_slide";
-								metadata.sharedType = topmost.type;
-							}
-						} else {
-							metadata.type = "popup";
-							metadata.popupInfo = {
-								id: topmost.id,
-								className: topmost.className
-							};
-						}
-					}
-
-					document.title = JSON.stringify(metadata);
-				})()`, presentationId, strings.TrimPrefix(job.FolderName, "_"), job.FolderName, timestampStr)
-				return chromedp.Evaluate(jsScript, nil).Do(ctx)
-			}),
-		)
 
 		// Finally, add the PrintToPDF printing action to the pipeline
 		actions = append(actions,
