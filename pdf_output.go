@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -299,6 +300,51 @@ func (a *App) CombineCompiledPDFs() (string, error) {
 	finalFilename := presentationId + ".pdf"
 	finalPath := filepath.Join(outDir, finalFilename)
 
+	// Extract and combine metadata from all slide pages
+	var combinedMeta []map[string]interface{}
+	currentPage := 1
+	for _, path := range sortedPaths {
+		// Get exact page count of this PDF using pdfcpu
+		pageCount, err := api.PageCountFile(path)
+		if err != nil {
+			pageCount = 1 // default fallback
+		}
+
+		startPage := currentPage
+		endPage := currentPage + pageCount - 1
+		currentPage = currentPage + pageCount
+
+		metaStr, err := a.ExtractPDFMetadata(path)
+		if err == nil && metaStr != "" && metaStr != "{}" {
+			var metaObj map[string]interface{}
+			if err := json.Unmarshal([]byte(metaStr), &metaObj); err == nil {
+				metaObj["startPage"] = startPage
+				metaObj["endPage"] = endPage
+				combinedMeta = append(combinedMeta, metaObj)
+			}
+		} else {
+			// Fallback placeholder for slides without embedded metadata to maintain page indexing
+			base := filepath.Base(path)
+			metaObj := map[string]interface{}{
+				"presentationId": presentationId,
+				"slideName":      base,
+				"folderName":     "",
+				"type":           "slide",
+				"startPage":      startPage,
+				"endPage":        endPage,
+			}
+			combinedMeta = append(combinedMeta, metaObj)
+		}
+	}
+
+	var combinedJSON string
+	if len(combinedMeta) > 0 {
+		metaBytes, err := json.Marshal(combinedMeta)
+		if err == nil {
+			combinedJSON = string(metaBytes)
+		}
+	}
+
 	// If the combined deck already exists, rename it to {presentationId}_oldX.pdf
 	if _, err := os.Stat(finalPath); err == nil {
 		// Find first available _oldX index
@@ -323,6 +369,22 @@ func (a *App) CombineCompiledPDFs() (string, error) {
 		return "", fmt.Errorf("failed to merge PDFs: %w", err)
 	}
 
+	// Inject the consolidated JSON array and presentation ID as PDF Document Properties of the merged PDF using pdfcpu
+	if combinedJSON != "" {
+		tempOut := finalPath + ".tmp"
+		err = api.AddPropertiesFile(finalPath, tempOut, map[string]string{
+			"combinedMetadata": combinedJSON,
+			"presentationId":   presentationId,
+		}, nil)
+		if err == nil {
+			os.Remove(finalPath)
+			os.Rename(tempOut, finalPath)
+		} else {
+			os.Remove(tempOut)
+			return "", fmt.Errorf("failed to inject metadata properties into combined PDF: %w", err)
+		}
+	}
+
 	return finalPath, nil
 }
 
@@ -338,6 +400,26 @@ func (a *App) DeleteCompiledPDF(filename string) error {
 
 // ExtractPDFMetadata parses a generated PDF file's Title field to retrieve the JSON metadata
 func (a *App) ExtractPDFMetadata(filePath string) (string, error) {
+	// 1. Hybrid: First try clean decoding using pdfcpu Properties API
+	f, err := os.Open(filePath)
+	if err == nil {
+		props, err := api.Properties(f, nil)
+		f.Close()
+		if err == nil && props != nil {
+			// Prioritize the full consolidated metadata array if available
+			if combinedVal, ok := props["combinedMetadata"]; ok && combinedVal != "" {
+				return combinedVal, nil
+			}
+			// Otherwise look for any custom property containing our marker
+			for _, val := range props {
+				if strings.Contains(val, "presentationId") {
+					return val, nil
+				}
+			}
+		}
+	}
+
+	// 2. Fallback: High-performance raw byte search
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "{}", err

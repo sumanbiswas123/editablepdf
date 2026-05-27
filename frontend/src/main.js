@@ -723,7 +723,78 @@ function openMetadataModal(pdf) {
   let html = '';
   try {
     const meta = JSON.parse(pdf.metadata || '{}');
-    if (!meta.presentationId) {
+    if (Array.isArray(meta)) {
+      // ─── RENDER COMBINED DECK SLIDES ACCORDION INDEX ────────────────────
+      const totalPages = meta.length;
+      const presentationId = meta[0]?.presentationId || 'Combined Deck';
+      
+      const getBadgeColor = (type) => {
+        switch (type) {
+          case 'slide': return 'linear-gradient(135deg, #4facfe, #00f2fe)';
+          case 'popup': return 'linear-gradient(135deg, var(--accent-pink), var(--accent-purple))';
+          case 'shared_on_slide': return 'linear-gradient(135deg, #a18cd1, #fbc2eb)';
+          case 'shared_on_popup': return 'linear-gradient(135deg, #f6d365, #fda085)';
+          default: return '#555';
+        }
+      };
+
+      const getSharedBadgeColor = (sharedType) => {
+        switch (sharedType) {
+          case 'ref': return 'linear-gradient(135deg, #11998e, #38ef7d)';
+          case 'pi': return 'linear-gradient(135deg, #f857a6, #ff5858)';
+          case 'isi': return 'linear-gradient(135deg, #f12711, #f5af19)';
+          case 'si': return 'linear-gradient(135deg, #e65c00, #F9D423)';
+          case 'email': return 'linear-gradient(135deg, #ee9ca7, #ffdde1)';
+          case 'menu': return 'linear-gradient(135deg, #2193b0, #6dd5ed)';
+          case 'flow': return 'linear-gradient(135deg, #00c6ff, #0072ff)';
+          case 'fragment': return 'linear-gradient(135deg, #e0c3fc, #8ec5fc)';
+          default: return 'linear-gradient(135deg, #b19ffb, #7026ff)';
+        }
+      };
+
+      html = `
+        <div class="metadata-info-card" style="border-left: 4px solid #00f2fe; background: rgba(0, 242, 254, 0.02);">
+          <div class="metadata-card-label" style="color: #00f2fe;">Combined Presentation Deck</div>
+          <div class="metadata-card-value highlight-blue" style="font-size: 1.15rem; font-weight: 700;">${presentationId}</div>
+          <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; font-weight: 500;">Stitched Pages: <span style="color: #fff; font-weight: 700;">${totalPages} slices</span></div>
+        </div>
+        
+        <div style="margin-top: 14px; margin-bottom: 6px; font-weight: 700; color: var(--text-light); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px;">Chronological Page Index</div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          ${meta.map((page, idx) => `
+            <div style="background: rgba(255,255,255,0.015); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 6px;">
+                <span style="font-size: 0.85rem; font-weight: 700; color: #fff;">
+                  📄 ${page.startPage && page.endPage ? (page.startPage === page.endPage ? `Page ${page.startPage}` : `Pages ${page.startPage} - ${page.endPage}`) : `Page ${idx + 1}`}
+                </span>
+                <span style="background: ${getBadgeColor(page.type)}; padding: 3px 10px; border-radius: 20px; font-size: 0.65rem; font-weight: 700; color: #080c14; text-transform: uppercase; letter-spacing: 0.5px;">${page.type.replace(/_/g, ' ')}</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <div style="font-size: 0.82rem; color: var(--text-light); font-weight: 600;">Slide: <span style="font-family: monospace; color: var(--accent-cyan); font-weight: normal;">${page.slideName}</span></div>
+                <div style="font-size: 0.78rem; color: var(--text-muted);">Folder: <span style="font-family: monospace;">${page.folderName}</span></div>
+              </div>
+              ${page.sharedType ? `
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.02);">
+                  <span style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 600;">Active Overlay</span>
+                  <span style="background: ${getSharedBadgeColor(page.sharedType)}; padding: 3px 8px; border-radius: 6px; font-size: 0.65rem; font-weight: 700; color: #080c14; text-transform: uppercase;">${page.sharedType}</span>
+                </div>
+              ` : ''}
+              ${page.openPopups && page.openPopups.length > 0 ? `
+                <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 600; margin-top: 2px;">Active Popups Stack (${page.openPopups.length})</div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  ${page.openPopups.map(p => `
+                    <div style="background: rgba(255,255,255,0.005); border-left: 2px solid ${p.type === 'slide_popup' ? 'var(--accent-pink)' : '#00f2fe'}; padding: 4px 10px; font-size: 0.75rem; font-family: monospace; color: var(--text-light); display: flex; justify-content: space-between;">
+                      <span>#${p.id || 'dialog'}</span>
+                      <span style="color: var(--text-muted); font-size: 0.68rem;">z: ${p.zIndex} (${p.type})</span>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } else if (!meta.presentationId) {
       html = `<div style="text-align: center; color: var(--text-muted); padding: 24px; font-family: 'Plus Jakarta Sans', sans-serif;">No structured compilation metadata found inside this PDF.</div>`;
     } else {
       const getBadgeColor = (type) => {
