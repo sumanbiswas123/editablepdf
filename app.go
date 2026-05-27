@@ -553,7 +553,7 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 				// 1. Detect visible popups. If NONE are visible, mark flag to skip flattening.
 				//    If popups ARE visible: save original display values, hide them all for clean screenshot.
 				chromedp.Evaluate(`(function() {
-					var dialogs = Array.from(document.querySelectorAll('.ui-dialog')).filter(function(d) {
+					var dialogs = Array.from(document.querySelectorAll('.ui-dialog, #customMenuWrapper, #flowSelector, #fragmentSelector')).filter(function(d) {
 						var cs = window.getComputedStyle(d);
 						return cs.display !== 'none' && cs.visibility !== 'hidden';
 					});
