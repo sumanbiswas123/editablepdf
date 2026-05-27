@@ -173,6 +173,28 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
 			if err == nil {
 				injection := `
 <script>
+(function() {
+  var lastUrl = window.location.href;
+  function checkUrl() {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      try {
+        window.parent.postMessage({
+          type: 'iframe_navigation',
+          url: lastUrl
+        }, '*');
+      } catch(_) {}
+    }
+  }
+  setInterval(checkUrl, 200);
+  try {
+    window.parent.postMessage({
+      type: 'iframe_navigation',
+      url: lastUrl
+    }, '*');
+  } catch(_) {}
+})();
+
 window.addEventListener('message', function(e) {
   if (e.data !== 'request_html') return;
 
@@ -620,10 +642,21 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 
 					base64Str := "data:image/png;base64," + base64.StdEncoding.EncodeToString(screenshotBuf)
 					jsScript := fmt.Sprintf(`(function() {
-						// Flatten #contentFrame to screenshot image
+						// Flatten #contentFrame by hiding direct content containers and keeping stylesheets active
 						var cf = document.querySelector("#contentFrame");
 						if (cf) {
-							cf.innerHTML = '<img src="%s" style="width:100%%; height:100%%; object-fit:cover; margin:0; padding:0; border:none; display:block;" />';
+							Array.from(cf.children).forEach(function(child) {
+								var tagName = child.tagName.toLowerCase();
+								if (tagName !== 'style' && tagName !== 'link' && !child.hasAttribute('data-pdf-flattened-bg')) {
+									child.style.setProperty('display', 'none', 'important');
+								}
+							});
+							
+							var bgImg = document.createElement('img');
+							bgImg.src = "%s";
+							bgImg.style.cssText = "width:100%%; height:100%%; object-fit:cover; margin:0; padding:0; border:none; display:block; position:absolute; top:0; left:0; z-index:-1;";
+							bgImg.setAttribute('data-pdf-flattened-bg', 'true');
+							cf.appendChild(bgImg);
 						}
 
 						// Restore ONLY the topmost popup with its ORIGINAL display value
@@ -649,11 +682,117 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 						// Lower overlays stay display:none — no stacking artifacts
 						return "restored";
 					})()`, base64Str)
-					var res string
-					return chromedp.Evaluate(jsScript, &res).Do(ctx)
+					return chromedp.Evaluate(jsScript, nil).Do(ctx)
 				}),
 			)
 		}
+
+		// Set document title with JSON metadata of slide/popup details so Chrome embeds it into PDF metadata
+		presentationId := filepath.Base(a.currentDir)
+		timestampStr := time.Now().Format(time.RFC3339)
+		actions = append(actions,
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				jsScript := fmt.Sprintf(`(function() {
+					var dialogs = Array.from(document.querySelectorAll('.ui-dialog, #customMenuWrapper, #flowSelector, #fragmentSelector, [id*="email"], [class*="email"], [id*="mail"], [class*="mail"], [class*="ref"], [id*="ref"], [class*="pi"], [id*="pi"], [class*="isi"], [id*="isi"]')).filter(function(d) {
+						var cs = window.getComputedStyle(d);
+						return cs.display !== 'none' && cs.visibility !== 'hidden';
+					});
+
+					// Sort by z-index descending so topmost is first
+					dialogs.sort(function(a, b) {
+						return (parseInt(window.getComputedStyle(b).zIndex) || 0) -
+						       (parseInt(window.getComputedStyle(a).zIndex) || 0);
+					});
+
+					var metadata = {
+						presentationId: %q,
+						slideName: %q,
+						folderName: %q,
+						type: "slide",
+						timestamp: %q
+					};
+
+					if (dialogs.length > 0) {
+						var openPopups = dialogs.map(function(d) {
+							var type = "slide_popup";
+							var id = d.id || "";
+							var cls = d.className || "";
+							var lowerId = id.toLowerCase();
+							var lowerCls = cls.toLowerCase();
+							
+							// Check if it is a shared popup
+							if (lowerId === 'custommenuwrapper' || lowerCls.includes('menu')) {
+								type = "menu";
+							} else if (lowerId === 'flowselector' || lowerCls.includes('flow')) {
+								type = "flow";
+							} else if (lowerId === 'fragmentselector' || lowerCls.includes('fragment')) {
+								type = "fragment";
+							} else if (lowerId.includes('ref') || lowerCls.includes('ref') || lowerId.includes('reference') || lowerCls.includes('reference')) {
+								type = "ref";
+							} else if (lowerId === 'pi' || lowerCls.split(/\\s+/).includes('pi') || lowerId.includes('pi-') || lowerCls.includes('pi-') || lowerId.includes('prescrib') || lowerCls.includes('prescrib')) {
+								type = "pi";
+							} else if (lowerId.includes('isi') || lowerCls.includes('isi') || lowerId.includes('safety') || lowerCls.includes('safety')) {
+								type = "isi";
+							} else if (lowerId === 'si' || lowerCls.split(/\\s+/).includes('si') || lowerId.includes('si-') || lowerCls.includes('si-')) {
+								type = "si";
+							} else if (lowerId.includes('email') || lowerCls.includes('email') || lowerId.includes('mail') || lowerCls.includes('mail')) {
+								type = "email";
+							}
+
+							return {
+								id: id,
+								className: cls,
+								type: type,
+								zIndex: parseInt(window.getComputedStyle(d).zIndex) || 0
+							};
+						});
+
+						metadata.openPopups = openPopups;
+
+						// Topmost popup
+						var topmost = openPopups[0];
+						
+						// Determine type of compilation unit
+						var isSharedTopmost = ["menu", "flow", "fragment", "ref", "pi", "isi", "si", "email"].includes(topmost.type) || 
+						                      topmost.id === 'customMenuWrapper' || 
+						                      topmost.id === 'flowSelector' || 
+						                      topmost.id === 'fragmentSelector';
+
+						if (isSharedTopmost) {
+							// Find if there is a slide popup behind it (e.g., standard .ui-dialog or other non-shared popups)
+							var parentPopup = null;
+							for (var i = 1; i < openPopups.length; i++) {
+								if (openPopups[i].type === "slide_popup") {
+									parentPopup = openPopups[i];
+									break;
+								}
+							}
+
+							if (parentPopup) {
+								metadata.type = "shared_on_popup";
+								metadata.parentPopup = {
+									id: parentPopup.id,
+									className: parentPopup.className
+								};
+								metadata.sharedType = topmost.type;
+							} else {
+								metadata.type = "shared_on_slide";
+								metadata.sharedType = topmost.type;
+							}
+						} else {
+							metadata.type = "popup";
+							metadata.popupInfo = {
+								id: topmost.id,
+								className: topmost.className
+							};
+						}
+					}
+
+					document.title = JSON.stringify(metadata);
+				})()`, presentationId, strings.TrimPrefix(job.FolderName, "_"), job.FolderName, timestampStr)
+				return chromedp.Evaluate(jsScript, nil).Do(ctx)
+			}),
+		)
 
 		// Finally, add the PrintToPDF printing action to the pipeline
 		actions = append(actions,

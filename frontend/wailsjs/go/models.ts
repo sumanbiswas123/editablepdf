@@ -1,5 +1,27 @@
 export namespace main {
 	
+	export class CompiledPDF {
+	    name: string;
+	    path: string;
+	    size: number;
+	    modified: string;
+	    serveUrl: string;
+	    metadata: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompiledPDF(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.size = source["size"];
+	        this.modified = source["modified"];
+	        this.serveUrl = source["serveUrl"];
+	        this.metadata = source["metadata"];
+	    }
+	}
 	export class ExportJob {
 	    slideName: string;
 	    folderName: string;

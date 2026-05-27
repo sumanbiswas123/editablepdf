@@ -4,168 +4,189 @@ import './app.css';
 import {
   SelectDirectory,
   ScanAndStartServer,
-  CompileSlidesToPDF,
-  SelectSavePath,
-  SelectScreenshotSavePath,
-  CompileScreenshot,
+  AutoCompileSlidePDF,
+  AutoCompileDeckPDF,
+  ListCompiledPDFs,
+  DeleteCompiledPDF,
   CompileSlidesToIDML,
   SelectIDMLSavePath
 } from '../wailsjs/go/main/App';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
-// App State
+// ─── App State ───────────────────────────────────────────────────────────────
 let state = {
   rootDirectory: '',
   slides: [],
   currentSlideIndex: -1,
-  customStates: {}, // slideFolderName -> outerHTML string
+  compiledPDFs: [],
   isCompiling: false,
   sleepMs: 800
 };
 
-// Scaffold main HTML shell
+// ─── Scaffold HTML ───────────────────────────────────────────────────────────
 document.querySelector('#app').innerHTML = `
-  <!-- Sidebar -->
-  <div class="sidebar">
+  <!-- Top Header Bar -->
+  <div class="top-bar">
     <div class="brand-section">
       <div class="brand-logo">P</div>
-      <div class="brand-title">eDA PDF compiler</div>
+      <div class="brand-title">eDA PDF Compiler</div>
     </div>
     
-    <button class="action-btn" id="btn-select-dir">
-      📁 Select Presentation Folder
-    </button>
+    <button class="btn-select-dir" id="btn-select-dir">📁 Select Folder</button>
+    <div class="dir-path-display" id="dir-path-display">No directory selected</div>
     
-    <!-- Settings Panel -->
-    <div class="settings-box">
-      <div class="settings-title">Render Settings</div>
-      
-      <div class="setting-row">
-        <label>Settle Delay: <span id="sleep-val">800ms</span></label>
-        <input type="range" id="input-sleep" min="300" max="3000" step="100" value="800" />
-      </div>
-      
-      <div class="setting-row">
-        <label>Default Output Name</label>
-        <input type="text" id="input-output-name" value="Editable_Presentation.pdf" placeholder="e.g. Campaign.pdf" />
-      </div>
-    </div>
-    
-    <div class="slide-list-header">Slides Deck</div>
-    <div class="slide-list-container" id="slide-list">
-      <div class="welcome-desc" style="font-size: 13px; text-align: center; margin-top: 20px;">
-        No presentation directory loaded.
-      </div>
+    <div class="settings-compact">
+      <label>Settle: <span id="sleep-val">800ms</span></label>
+      <input type="range" id="input-sleep" min="300" max="3000" step="100" value="800" />
     </div>
   </div>
 
-  <!-- Workspace -->
-  <div class="workspace">
-    <!-- Top Header -->
-    <div class="header">
-      <div class="dir-path" id="dir-path-display">No directory selected</div>
-      <div class="dir-path" id="slides-count-display">0 Slides Discovered</div>
+  <!-- Main 3-Panel Layout -->
+  <div class="main-content">
+    <!-- Left Panel: Slides -->
+    <div class="panel-left">
+      <div class="panel-header">
+        Slides Deck
+        <span class="count-badge" id="slides-count">0</span>
+      </div>
+      <div class="slide-list" id="slide-list">
+        <div class="slide-empty">No presentation loaded</div>
+      </div>
     </div>
-    
-    <!-- Canvas area -->
-    <div class="canvas-container">
-      <!-- Welcome overlay -->
+
+    <!-- Center Panel: Preview -->
+    <div class="panel-center">
       <div class="welcome-overlay" id="welcome-view">
         <div class="welcome-icon">✨</div>
-        <div class="welcome-title">Interactive HTML eDA PDF Compiler</div>
+        <div class="welcome-title">Interactive eDA PDF Compiler</div>
         <div class="welcome-desc">
           Select an eDA campaign folder containing slide subfolders (like _001, _002, etc.) and a sibling "shared" assets folder to begin.
         </div>
       </div>
       
-      <!-- Floating Iframe Controls overlay -->
-      <div class="floating-controls" id="floating-toolbar" style="display: none;">
-        <button class="nav-btn" id="btn-prev">👈 Prev</button>
-        <div class="nav-divider"></div>
-        <button class="btn-pill btn-capture" id="btn-capture-state">✨ Capture Popup State</button>
-        <button class="btn-pill btn-reset" id="btn-reset-state">🧹 Reset</button>
-        <div class="nav-divider"></div>
-        <button class="nav-btn" id="btn-next">Next 👉</button>
-      </div>
-      
-      <!-- 1024x768px Locked Slide Frame -->
       <div class="canvas-frame" id="canvas-frame" style="display: none;">
         <iframe id="slide-iframe"></iframe>
       </div>
+      
+      <div class="floating-controls" id="floating-toolbar" style="display: none;">
+        <button class="nav-btn" id="btn-prev">👈 Prev</button>
+        <div class="nav-divider"></div>
+        <span class="slide-counter" id="slide-counter">1 / 1</span>
+        <div class="nav-divider"></div>
+        <button class="nav-btn" id="btn-next">Next 👉</button>
+      </div>
+    </div>
+
+    <!-- Right Panel: Compiled PDFs -->
+    <div class="panel-right">
+      <div class="panel-header">
+        Compiled PDFs
+        <span class="count-badge" id="pdf-count">0</span>
+      </div>
+      <div class="pdf-list" id="pdf-list">
+        <div class="pdf-empty">No PDFs compiled yet.<br/>Compile slides to see them here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PDF Viewer Overlay -->
+  <div class="pdf-viewer-overlay" id="pdf-viewer" style="display: none;">
+    <div class="pdf-viewer-header">
+      <div class="pdf-viewer-title">📄 <span id="pdf-viewer-title-text">Document.pdf</span></div>
+      <div style="display: flex; gap: 12px; align-items: center; justify-content: center; flex: 1; max-width: 400px; margin: 0 auto;">
+        <button class="nav-btn" id="btn-pdf-prev" style="padding: 6px 14px; border-radius: 8px; font-weight: 600; font-size: 12px; margin: 0;">👈 Prev PDF</button>
+        <span id="pdf-viewer-counter" style="color: var(--text-muted); font-size: 0.85rem; font-family: monospace; font-weight: 600; min-width: 60px; text-align: center;">1 / 1</span>
+        <button class="nav-btn" id="btn-pdf-next" style="padding: 6px 14px; border-radius: 8px; font-weight: 600; font-size: 12px; margin: 0;">Next PDF 👉</button>
+      </div>
+      <button class="btn-close-viewer" id="btn-close-viewer">✕ Close</button>
+    </div>
+    <iframe class="pdf-viewer-frame" id="pdf-viewer-frame" src=""></iframe>
+  </div>
+
+  <!-- Metadata Viewer Modal -->
+  <div class="pdf-viewer-overlay" id="metadata-viewer" style="display: none; z-index: 10000; align-items: center; justify-content: center; background: rgba(4, 6, 10, 0.82); backdrop-filter: blur(16px);">
+    <div class="metadata-modal-wrapper">
+      <div class="metadata-header">
+        <h3 class="metadata-title-text">📄 PDF Metadata Details</h3>
+        <button class="metadata-close-btn" id="btn-close-metadata">✕</button>
+      </div>
+      <div class="metadata-scroll-content" id="metadata-content">
+        <!-- Filled dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Compile Bar -->
+  <div class="bottom-bar">
+    <div class="progress-section" id="progress-area">
+      <div class="progress-info">
+        <div id="progress-status-text">Preparing renderer...</div>
+        <div id="progress-percentage">0%</div>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="progress-indicator"></div>
+      </div>
     </div>
     
-    <!-- Bottom Compile Bar -->
-    <div class="bottom-bar">
-      <!-- Progress Bar -->
-      <div class="progress-section" id="progress-area">
-        <div class="progress-info">
-          <div id="progress-status-text">Preparing renderer...</div>
-          <div id="progress-percentage">0%</div>
-        </div>
-        <div class="progress-bar-container">
-          <div class="progress-bar" id="progress-indicator"></div>
-        </div>
-      </div>
-      
-      <div style="display: flex; gap: 12px; margin-left: auto;">
-        <button class="compile-btn" id="btn-idml" style="background: linear-gradient(135deg, #00f2fe, #4facfe); box-shadow: 0 4px 20px rgba(79, 172, 254, 0.35);" disabled>
-          📁 Export to IDML
-        </button>
-        <button class="compile-btn" id="btn-screenshot" style="background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple)); box-shadow: 0 4px 20px rgba(255, 121, 198, 0.35);" disabled>
-          📄 Compile Slide PDF
-        </button>
-        <button class="compile-btn" id="btn-compile" disabled>
-          🚀 Compile Entire Deck
-        </button>
-      </div>
+    <div class="compile-buttons">
+      <button class="compile-btn" id="btn-idml" style="background: linear-gradient(135deg, #00f2fe, #4facfe); box-shadow: 0 4px 16px rgba(79, 172, 254, 0.3);" disabled>
+        📁 Export IDML
+      </button>
+      <button class="compile-btn" id="btn-screenshot" style="background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple)); box-shadow: 0 4px 16px rgba(255, 121, 198, 0.3);" disabled>
+        📄 Compile Slide
+      </button>
+      <button class="compile-btn" id="btn-compile" disabled>
+        🚀 Compile Deck
+      </button>
     </div>
   </div>
 `;
 
-// DOM Selectors
+// ─── DOM Selectors ───────────────────────────────────────────────────────────
 const btnSelectDir = document.querySelector('#btn-select-dir');
 const btnCompile = document.querySelector('#btn-compile');
 const btnScreenshot = document.querySelector('#btn-screenshot');
 const btnIdml = document.querySelector('#btn-idml');
 const inputSleep = document.querySelector('#input-sleep');
 const sleepVal = document.querySelector('#sleep-val');
-const inputOutputName = document.querySelector('#input-output-name');
 const slideList = document.querySelector('#slide-list');
 const dirPathDisplay = document.querySelector('#dir-path-display');
-const slidesCountDisplay = document.querySelector('#slides-count-display');
+const slidesCount = document.querySelector('#slides-count');
 const welcomeView = document.querySelector('#welcome-view');
 const canvasFrame = document.querySelector('#canvas-frame');
 const slideIframe = document.querySelector('#slide-iframe');
 const floatingToolbar = document.querySelector('#floating-toolbar');
+const slideCounter = document.querySelector('#slide-counter');
 const btnPrev = document.querySelector('#btn-prev');
 const btnNext = document.querySelector('#btn-next');
-const btnCaptureState = document.querySelector('#btn-capture-state');
-const btnResetState = document.querySelector('#btn-reset-state');
+const pdfList = document.querySelector('#pdf-list');
+const pdfCount = document.querySelector('#pdf-count');
+const pdfViewer = document.querySelector('#pdf-viewer');
+const pdfViewerTitleText = document.querySelector('#pdf-viewer-title-text');
+const pdfViewerFrame = document.querySelector('#pdf-viewer-frame');
+const btnCloseViewer = document.querySelector('#btn-close-viewer');
 const progressArea = document.querySelector('#progress-area');
 const progressStatusText = document.querySelector('#progress-status-text');
 const progressPercentage = document.querySelector('#progress-percentage');
 const progressIndicator = document.querySelector('#progress-indicator');
 
-// Listen to slide load & settle delay slider
+// ─── Settings ────────────────────────────────────────────────────────────────
 inputSleep.addEventListener('input', (e) => {
   state.sleepMs = parseInt(e.target.value, 10);
   sleepVal.innerText = `${state.sleepMs}ms`;
 });
 
-// Event: Select Directory
+// ─── Directory Selection ─────────────────────────────────────────────────────
 btnSelectDir.addEventListener('click', async () => {
   try {
     const dir = await SelectDirectory();
-    if (dir) {
-      loadDirectory(dir);
-    }
+    if (dir) loadDirectory(dir);
   } catch (err) {
     console.error('Directory selection failed:', err);
   }
 });
 
-// Load and scan directory
 async function loadDirectory(dirPath) {
   try {
     dirPathDisplay.innerHTML = `Loading: <span>${dirPath}</span>`;
@@ -173,61 +194,46 @@ async function loadDirectory(dirPath) {
     
     state.rootDirectory = result.parentPath;
     state.slides = result.slides;
-    state.customStates = {}; // Clear previous states
     state.currentSlideIndex = -1;
     
-    dirPathDisplay.innerHTML = `Folder: <span>${state.rootDirectory}</span>`;
-    slidesCountDisplay.innerText = `${state.slides.length} Slides Discovered`;
+    dirPathDisplay.innerHTML = `<span>${state.rootDirectory}</span>`;
+    slidesCount.innerText = state.slides.length;
     
     if (state.slides.length > 0) {
       renderSlideList();
       btnCompile.removeAttribute('disabled');
       btnScreenshot.removeAttribute('disabled');
       btnIdml.removeAttribute('disabled');
-      // Load first slide
       loadSlide(0);
     } else {
-      slideList.innerHTML = `<div class="welcome-desc" style="font-size: 13px; text-align: center; margin-top: 20px;">No slide subfolders found.</div>`;
+      slideList.innerHTML = '<div class="slide-empty">No slide subfolders found.</div>';
       btnCompile.setAttribute('disabled', 'true');
       btnScreenshot.setAttribute('disabled', 'true');
       btnIdml.setAttribute('disabled', 'true');
     }
+    
+    // Refresh PDF list for this presentation
+    refreshPDFList();
   } catch (err) {
-    console.error('Failed to load presentation directory:', err);
+    console.error('Failed to load directory:', err);
     dirPathDisplay.innerText = 'Failed to load directory';
   }
 }
 
-// Render the sidebar list of slides
+// ─── Slide List Rendering ────────────────────────────────────────────────────
 function renderSlideList() {
   slideList.innerHTML = '';
   state.slides.forEach((slide, idx) => {
     const item = document.createElement('div');
     item.className = `slide-item ${idx === state.currentSlideIndex ? 'active' : ''}`;
     item.id = `slide-item-${idx}`;
-    
-    // Determine status badge
-    let badgeHtml = '<span class="slide-badge badge-default">Ready</span>';
-    if (state.customStates[slide.folderName]) {
-      badgeHtml = '<span class="slide-badge badge-custom">Custom State</span>';
-    }
-    
-    item.innerHTML = `
-      <div class="slide-info">
-        <div class="slide-name">${slide.name}</div>
-        ${badgeHtml}
-      </div>
-    `;
-    
-    item.addEventListener('click', () => {
-      loadSlide(idx);
-    });
-    
+    item.innerHTML = `<div class="slide-name">${slide.name}</div>`;
+    item.addEventListener('click', () => loadSlide(idx));
     slideList.appendChild(item);
   });
 }
 
-// Load a slide into our locked 1024x768px frame
+// ─── Slide Loading ───────────────────────────────────────────────────────────
 function loadSlide(idx) {
   if (idx < 0 || idx >= state.slides.length) return;
   state.currentSlideIndex = idx;
@@ -239,283 +245,509 @@ function loadSlide(idx) {
   
   const slide = state.slides[idx];
   
-  // Switch view from welcome to canvas
+  // Switch to canvas view
   welcomeView.style.display = 'none';
   canvasFrame.style.display = 'block';
   floatingToolbar.style.display = 'flex';
   
-  // Load standard URL
+  // Update counter
+  slideCounter.innerText = `${idx + 1} / ${state.slides.length}`;
+  
+  // Load slide URL
   slideIframe.src = slide.url;
 }
 
-// ─── Iframe Auto-Sync ────────────────────────────────────────────────────────
-// When the eDA's internal navigation arrows change the iframe URL, we need to
-// keep state.currentSlideIndex in sync, otherwise btnScreenshot uses stale data.
-slideIframe.addEventListener('load', () => {
-  if (!slideIframe.src || slideIframe.src === 'about:blank') return;
+// ─── Cross-Origin Navigation Listener ────────────────────────────────────────
+// Captures secure postMessage slide navigation alerts sent by our bridge script inside the iframe.
+// This completely bypasses CORS restrictions and eliminates layout/indexing race conditions!
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'iframe_navigation') {
+    const loadedUrl = e.data.url;
+    if (!loadedUrl || loadedUrl === 'about:blank') return;
 
-  // Normalise the loaded URL so we can compare it to our slide list
-  let loadedUrl;
-  try {
-    loadedUrl = new URL(slideIframe.src).href;
-  } catch (_) {
-    return;
-  }
-
-  // Try exact match first, then basename match (handles ?cache-bust suffixes etc.)
-  let matchIdx = state.slides.findIndex((s) => {
-    try { return new URL(s.url).href === loadedUrl; } catch (_) { return false; }
-  });
-
-  if (matchIdx === -1) {
-    // Fallback: compare by path segments — match the folder name inside the URL
-    const loadedParts = new URL(loadedUrl).pathname.split('/').filter(Boolean);
-    matchIdx = state.slides.findIndex((s) => {
-      try {
-        const slideParts = new URL(s.url).pathname.split('/').filter(Boolean);
-        // The slide folder is the first path segment on our local server
-        return slideParts[0] && loadedParts[0] && slideParts[0] === loadedParts[0];
-      } catch (_) { return false; }
+    // 1. Try exact URL match
+    let matchIdx = state.slides.findIndex((s) => {
+      try { return new URL(s.url).href === loadedUrl; } catch (_) { return false; }
     });
-  }
 
-  if (matchIdx !== -1 && matchIdx !== state.currentSlideIndex) {
-    state.currentSlideIndex = matchIdx;
+    // 2. Try boundary-safe case-insensitive folder name regex match (handles slashes, dashes, hashes, queries)
+    if (matchIdx === -1) {
+      matchIdx = state.slides.findIndex((s) => {
+        if (!s.folderName) return false;
+        const cleanFolder = s.folderName.replace(/^_+|_+$/g, '').toLowerCase(); // e.g. "001"
+        const lowerUrl = loadedUrl.toLowerCase();
+        const regex = new RegExp('[\\/_]' + cleanFolder + '([\\/_\\?\\.#]|$)');
+        return regex.test(lowerUrl);
+      });
+    }
 
-    // Sync sidebar highlight without reloading the iframe
-    document.querySelectorAll('.slide-item').forEach((item) => item.classList.remove('active'));
-    const activeItem = document.querySelector(`#slide-item-${matchIdx}`);
-    if (activeItem) {
-      activeItem.classList.add('active');
-      activeItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (matchIdx !== -1 && matchIdx !== state.currentSlideIndex) {
+      state.currentSlideIndex = matchIdx;
+      document.querySelectorAll('.slide-item').forEach((item) => item.classList.remove('active'));
+      const activeItem = document.querySelector(`#slide-item-${matchIdx}`);
+      if (activeItem) {
+        activeItem.classList.add('active');
+        activeItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      slideCounter.innerText = `${matchIdx + 1} / ${state.slides.length}`;
     }
   }
 });
 
-// eDA navigation events
+// ─── Navigation ──────────────────────────────────────────────────────────────
 btnPrev.addEventListener('click', () => {
-  if (state.currentSlideIndex > 0) {
-    loadSlide(state.currentSlideIndex - 1);
-  }
+  if (state.currentSlideIndex > 0) loadSlide(state.currentSlideIndex - 1);
 });
 
 btnNext.addEventListener('click', () => {
-  if (state.currentSlideIndex < state.slides.length - 1) {
-    loadSlide(state.currentSlideIndex + 1);
-  }
+  if (state.currentSlideIndex < state.slides.length - 1) loadSlide(state.currentSlideIndex + 1);
 });
 
-// Interactive state bridge event listener
-window.addEventListener('message', (e) => {
-  if (e.data && e.data.type === 'captured_html') {
-    const activeSlide = state.slides[state.currentSlideIndex];
-    state.customStates[activeSlide.folderName] = e.data.html;
+// ─── Auto-Capture Current Iframe State ───────────────────────────────────────
+// Captures the live DOM of the current iframe (including any open popups)
+// by sending the bridge script's 'request_html' message and waiting for response
+function captureCurrentSlideState() {
+  return new Promise((resolve) => {
+    // Timeout fallback: if no response in 3s, resolve with empty (compile from URL)
+    const timeout = setTimeout(() => {
+      window.removeEventListener('message', handler);
+      resolve('');
+    }, 3000);
     
-    // Update sidebar UI with status badge
-    renderSlideList();
+    const handler = (e) => {
+      if (e.data && e.data.type === 'captured_html') {
+        clearTimeout(timeout);
+        window.removeEventListener('message', handler);
+        resolve(e.data.html);
+      }
+    };
     
-    // Flash message
-    btnCaptureState.innerText = '✅ Saved State!';
-    btnCaptureState.style.background = 'linear-gradient(135deg, var(--accent-green), var(--accent-blue))';
-    setTimeout(() => {
-      btnCaptureState.innerText = '✨ Capture Popup State';
-      btnCaptureState.style.background = '';
-    }, 1500);
-  }
-});
+    window.addEventListener('message', handler);
+    
+    try {
+      slideIframe.contentWindow.postMessage('request_html', '*');
+    } catch (_) {
+      clearTimeout(timeout);
+      window.removeEventListener('message', handler);
+      resolve('');
+    }
+  });
+}
 
-// Send postMessage DOM capture command to iframe
-btnCaptureState.addEventListener('click', () => {
-  if (state.currentSlideIndex === -1) return;
-  slideIframe.contentWindow.postMessage('request_html', '*');
-});
-
-// Reset slide custom captured state to default URL
-btnResetState.addEventListener('click', () => {
-  if (state.currentSlideIndex === -1) return;
+// ─── Compile Single Slide PDF ────────────────────────────────────────────────
+btnScreenshot.addEventListener('click', async () => {
+  if (state.currentSlideIndex === -1 || state.isCompiling) return;
+  
   const activeSlide = state.slides[state.currentSlideIndex];
   
-  if (state.customStates[activeSlide.folderName]) {
-    delete state.customStates[activeSlide.folderName];
-    renderSlideList();
-    // Reload iframe to clear active popup visual state
-    slideIframe.src = activeSlide.url;
+  try {
+    // Start compile UI
+    setCompileUIState(true);
+    progressStatusText.innerText = 'Auto-capturing slide state...';
+    
+    // Auto-capture current iframe state (includes any open popups)
+    const capturedHtml = await captureCurrentSlideState();
+    
+    progressStatusText.innerText = 'Compiling slide PDF...';
+    
+    const job = {
+      slideName: activeSlide.name,
+      folderName: activeSlide.folderName,
+      url: activeSlide.url,
+      customHtml: capturedHtml
+    };
+    
+    const resultPath = await AutoCompileSlidePDF(job, state.sleepMs);
+    
+    progressStatusText.innerHTML = `📄 Saved: <span style="color: var(--accent-green); font-family: monospace;">${resultPath}</span>`;
+    progressPercentage.innerText = '100%';
+    progressIndicator.style.width = '100%';
+    progressIndicator.style.background = 'var(--accent-green)';
+    
+    // Refresh PDF list
+    await refreshPDFList();
+  } catch (err) {
+    console.error('Slide compilation failed:', err);
+    progressStatusText.innerHTML = `❌ Failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
+    progressIndicator.style.background = 'var(--accent-pink)';
+  } finally {
+    setCompileUIState(false);
   }
 });
 
-// Compile eDA slides to multi-page vector PDF
+// ─── Compile Entire Deck PDF ─────────────────────────────────────────────────
 btnCompile.addEventListener('click', async () => {
   if (state.slides.length === 0 || state.isCompiling) return;
   
-  // 1. Select output file save path using Wails native SaveFileDialog
-  let defaultName = inputOutputName.value.trim() || 'Editable_Presentation.pdf';
-  if (!defaultName.endsWith('.pdf')) defaultName += '.pdf';
-  
   try {
-    const savePath = await SelectSavePath(defaultName);
-    if (!savePath) return; // Dialog cancelled
-    
-    // Start compile UI state
-    state.isCompiling = true;
-    btnCompile.setAttribute('disabled', 'true');
-    btnScreenshot.setAttribute('disabled', 'true');
-    btnSelectDir.setAttribute('disabled', 'true');
-    progressArea.style.display = 'flex';
-    
-    // 2. Prepare rendering jobs
-    const jobs = state.slides.map((slide) => {
-      const customHtml = state.customStates[slide.folderName] || '';
-      return {
-        slideName: slide.name,
-        folderName: slide.folderName,
-        url: slide.url,
-        customHtml: customHtml
-      };
-    });
-    
-    // 3. Trigger Wails backend compilation
+    setCompileUIState(true);
     progressStatusText.innerText = 'Opening background engine...';
     progressPercentage.innerText = '0%';
     progressIndicator.style.width = '0%';
     
-    const resultPath = await CompileSlidesToPDF(jobs, savePath, state.sleepMs);
+    // Build jobs for all slides (no custom state — compile from URL)
+    const jobs = state.slides.map((slide) => ({
+      slideName: slide.name,
+      folderName: slide.folderName,
+      url: slide.url,
+      customHtml: ''
+    }));
     
-    // Compilation successful!
-    progressStatusText.innerHTML = `🎉 Merged Successfully to <span style="font-family: monospace; color: var(--accent-green);">${resultPath}</span>`;
+    const resultPath = await AutoCompileDeckPDF(jobs, state.sleepMs);
+    
+    progressStatusText.innerHTML = `🎉 Deck compiled: <span style="color: var(--accent-green); font-family: monospace;">${resultPath}</span>`;
     progressPercentage.innerText = '100%';
     progressIndicator.style.width = '100%';
     progressIndicator.style.background = 'var(--accent-green)';
     progressIndicator.style.boxShadow = '0 0 10px var(--accent-green)';
     
+    await refreshPDFList();
   } catch (err) {
-    console.error('Compilation failed:', err);
-    progressStatusText.innerHTML = `❌ Error: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
+    console.error('Deck compilation failed:', err);
+    progressStatusText.innerHTML = `❌ Failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
     progressIndicator.style.background = 'var(--accent-pink)';
-    progressIndicator.style.boxShadow = '0 0 10px var(--accent-pink)';
   } finally {
-    state.isCompiling = false;
-    btnCompile.removeAttribute('disabled');
-    btnScreenshot.removeAttribute('disabled');
-    btnSelectDir.removeAttribute('disabled');
+    setCompileUIState(false);
   }
 });
 
-// Compile single active slide to a vector editable PDF
-btnScreenshot.addEventListener('click', async () => {
-  if (state.currentSlideIndex === -1 || state.isCompiling) return;
-  
-  const activeSlide = state.slides[state.currentSlideIndex];
-  let defaultName = `${activeSlide.name}_Editable.pdf`;
-  
-  try {
-    const savePath = await SelectSavePath(defaultName);
-    if (!savePath) return; // Dialog cancelled
-    
-    // Start UI state
-    state.isCompiling = true;
-    btnCompile.setAttribute('disabled', 'true');
-    btnScreenshot.setAttribute('disabled', 'true');
-    btnSelectDir.setAttribute('disabled', 'true');
-    progressArea.style.display = 'flex';
-    progressStatusText.innerText = 'Compiling single slide PDF...';
-    
-    const customHtml = state.customStates[activeSlide.folderName] || '';
-    const jobs = [{
-      slideName: activeSlide.name,
-      folderName: activeSlide.folderName,
-      url: activeSlide.url,
-      customHtml: customHtml
-    }];
-    
-    const resultPath = await CompileSlidesToPDF(jobs, savePath, state.sleepMs);
-    
-    progressStatusText.innerHTML = `📄 Single slide PDF compiled to <span style="font-family: monospace; color: var(--accent-green);">${resultPath}</span>`;
-  } catch (err) {
-    console.error('Slide compilation failed:', err);
-    progressStatusText.innerHTML = `❌ Compilation failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
-  } finally {
-    state.isCompiling = false;
-    btnCompile.removeAttribute('disabled');
-    btnScreenshot.removeAttribute('disabled');
-    btnIdml.removeAttribute('disabled');
-    btnSelectDir.removeAttribute('disabled');
-  }
-});
-
-// Compile eDA slides to fully editable InDesign (IDML) package
+// ─── IDML Export (Kept as-is) ────────────────────────────────────────────────
 btnIdml.addEventListener('click', async () => {
   if (state.slides.length === 0 || state.isCompiling) return;
 
-  // Pre-fill default IDML save name based on text box or default
-  let defaultName = inputOutputName.value.trim() || 'Editable_Presentation.pdf';
-  // Replace .pdf with .idml
-  defaultName = defaultName.replace(/\.pdf$/i, '') + '.idml';
-  if (!defaultName.endsWith('.idml')) defaultName += '.idml';
+  let defaultName = 'Editable_Presentation.idml';
 
   try {
     const savePath = await SelectIDMLSavePath(defaultName);
-    if (!savePath) return; // Dialog cancelled
+    if (!savePath) return;
 
-    // Start IDML compile UI state
-    state.isCompiling = true;
+    setCompileUIState(true);
+    progressStatusText.innerText = 'Extracting DOM vector coordinates...';
+    progressPercentage.innerText = '0%';
+    progressIndicator.style.width = '0%';
+
+    const jobs = state.slides.map((slide) => ({
+      slideName: slide.name,
+      folderName: slide.folderName,
+      url: slide.url,
+      customHtml: ''
+    }));
+
+    const resultPath = await CompileSlidesToIDML(jobs, savePath, state.sleepMs);
+
+    progressStatusText.innerHTML = `🎉 IDML exported: <span style="color: var(--accent-green); font-family: monospace;">${resultPath}</span>`;
+    progressPercentage.innerText = '100%';
+    progressIndicator.style.width = '100%';
+    progressIndicator.style.background = 'var(--accent-green)';
+  } catch (err) {
+    console.error('IDML export failed:', err);
+    progressStatusText.innerHTML = `❌ IDML failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
+    progressIndicator.style.background = 'var(--accent-pink)';
+  } finally {
+    setCompileUIState(false);
+  }
+});
+
+// ─── Compile UI State Helper ─────────────────────────────────────────────────
+function setCompileUIState(compiling) {
+  state.isCompiling = compiling;
+  if (compiling) {
     btnCompile.setAttribute('disabled', 'true');
     btnScreenshot.setAttribute('disabled', 'true');
     btnIdml.setAttribute('disabled', 'true');
     btnSelectDir.setAttribute('disabled', 'true');
     progressArea.style.display = 'flex';
-
-    // 2. Prepare rendering/layout scraping jobs
-    const jobs = state.slides.map((slide) => {
-      const customHtml = state.customStates[slide.folderName] || '';
-      return {
-        slideName: slide.name,
-        folderName: slide.folderName,
-        url: slide.url,
-        customHtml: customHtml
-      };
-    });
-
-    // 3. Trigger Wails backend IDML compilation
-    progressStatusText.innerText = 'Extracting DOM vector coordinates...';
-    progressPercentage.innerText = '0%';
-    progressIndicator.style.width = '0%';
-
-    const resultPath = await CompileSlidesToIDML(jobs, savePath, state.sleepMs);
-
-    // Compilation successful!
-    progressStatusText.innerHTML = `🎉 IDML exported successfully to <span style="font-family: monospace; color: var(--accent-green);">${resultPath}</span>`;
-    progressPercentage.innerText = '100%';
-    progressIndicator.style.width = '100%';
-    progressIndicator.style.background = 'var(--accent-green)';
-    progressIndicator.style.boxShadow = '0 0 10px var(--accent-green)';
-
-  } catch (err) {
-    console.error('IDML compilation failed:', err);
-    progressStatusText.innerHTML = `❌ IDML Export failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
-    progressIndicator.style.background = 'var(--accent-pink)';
-    progressIndicator.style.boxShadow = '0 0 10px var(--accent-pink)';
-  } finally {
-    state.isCompiling = false;
+    progressIndicator.style.background = '';
+    progressIndicator.style.boxShadow = '';
+  } else {
     btnCompile.removeAttribute('disabled');
     btnScreenshot.removeAttribute('disabled');
     btnIdml.removeAttribute('disabled');
     btnSelectDir.removeAttribute('disabled');
   }
+}
+
+// ─── PDF List Management ─────────────────────────────────────────────────────
+async function refreshPDFList() {
+  try {
+    const pdfs = await ListCompiledPDFs();
+    state.compiledPDFs = pdfs;
+    pdfCount.innerText = pdfs.length;
+    renderPDFList();
+  } catch (err) {
+    console.error('Failed to list PDFs:', err);
+  }
+}
+
+function renderPDFList() {
+  if (state.compiledPDFs.length === 0) {
+    pdfList.innerHTML = '<div class="pdf-empty">No PDFs compiled yet.<br/>Compile slides to see them here.</div>';
+    return;
+  }
+  
+  pdfList.innerHTML = '';
+  state.compiledPDFs.forEach((pdf) => {
+    const item = document.createElement('div');
+    item.className = 'pdf-item';
+    
+    const sizeStr = formatFileSize(pdf.size);
+    
+    item.innerHTML = `
+      <div class="pdf-item-icon">📄</div>
+      <div class="pdf-item-info">
+        <div class="pdf-item-name">${pdf.name}</div>
+        <div class="pdf-item-meta">${sizeStr}</div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center; z-index: 10;">
+        <button class="pdf-item-info-btn" title="View PDF Metadata" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); font-size: 0.95rem; cursor: pointer; padding: 6px; border-radius: 8px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; color: var(--text-muted);">ℹ️</button>
+        <button class="pdf-item-delete" title="Delete">🗑️</button>
+      </div>
+    `;
+    
+    // Hover effects for the info button
+    const infoBtn = item.querySelector('.pdf-item-info-btn');
+    infoBtn.addEventListener('mouseenter', () => {
+      infoBtn.style.background = 'rgba(0, 242, 254, 0.15)';
+      infoBtn.style.color = '#00f2fe';
+    });
+    infoBtn.addEventListener('mouseleave', () => {
+      infoBtn.style.background = 'rgba(255,255,255,0.05)';
+      infoBtn.style.color = 'var(--text-muted)';
+    });
+
+    // Click to view PDF
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.pdf-item-delete') || e.target.closest('.pdf-item-info-btn')) return;
+      openPDFViewer(pdf);
+    });
+
+    // Info button click
+    infoBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMetadataModal(pdf);
+    });
+    
+    // Delete button
+    item.querySelector('.pdf-item-delete').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        // 1. Optimistic UI update: instantly hide from list
+        state.compiledPDFs = state.compiledPDFs.filter(p => p.name !== pdf.name);
+        pdfCount.innerText = state.compiledPDFs.length;
+        renderPDFList();
+
+        // 2. Perform file deletion in the backend
+        await DeleteCompiledPDF(pdf.name);
+        
+        // 3. Settle delay: wait 150ms for Windows OS filesystem indexing to catch up
+        setTimeout(async () => {
+          await refreshPDFList();
+        }, 150);
+      } catch (err) {
+        console.error('Failed to delete PDF:', err);
+        // Rollback state if backend fails
+        await refreshPDFList();
+      }
+    });
+    
+    pdfList.appendChild(item);
+  });
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function openMetadataModal(pdf) {
+  const metadataViewer = document.querySelector('#metadata-viewer');
+  const metadataContent = document.querySelector('#metadata-content');
+  const btnCloseMetadata = document.querySelector('#btn-close-metadata');
+
+  let html = '';
+  try {
+    const meta = JSON.parse(pdf.metadata || '{}');
+    if (!meta.presentationId) {
+      html = `<div style="text-align: center; color: var(--text-muted); padding: 24px; font-family: 'Plus Jakarta Sans', sans-serif;">No structured compilation metadata found inside this PDF.</div>`;
+    } else {
+      const getBadgeColor = (type) => {
+        switch (type) {
+          case 'slide': return 'linear-gradient(135deg, #4facfe, #00f2fe)';
+          case 'popup': return 'linear-gradient(135deg, var(--accent-pink), var(--accent-purple))';
+          case 'shared_on_slide': return 'linear-gradient(135deg, #a18cd1, #fbc2eb)';
+          case 'shared_on_popup': return 'linear-gradient(135deg, #f6d365, #fda085)';
+          default: return '#555';
+        }
+      };
+
+      const getSharedBadgeColor = (sharedType) => {
+        switch (sharedType) {
+          case 'ref': return 'linear-gradient(135deg, #11998e, #38ef7d)';
+          case 'pi': return 'linear-gradient(135deg, #f857a6, #ff5858)';
+          case 'isi': return 'linear-gradient(135deg, #f12711, #f5af19)';
+          case 'si': return 'linear-gradient(135deg, #e65c00, #F9D423)';
+          case 'email': return 'linear-gradient(135deg, #ee9ca7, #ffdde1)';
+          case 'menu': return 'linear-gradient(135deg, #2193b0, #6dd5ed)';
+          case 'flow': return 'linear-gradient(135deg, #00c6ff, #0072ff)';
+          case 'fragment': return 'linear-gradient(135deg, #e0c3fc, #8ec5fc)';
+          default: return 'linear-gradient(135deg, #b19ffb, #7026ff)';
+        }
+      };
+
+      html = `
+        <div class="metadata-info-card">
+          <div class="metadata-card-label">Presentation ID</div>
+          <div class="metadata-card-value highlight-blue">${meta.presentationId}</div>
+        </div>
+        <div class="metadata-info-card">
+          <div class="metadata-card-label">Slide Number (Name)</div>
+          <div class="metadata-card-value">${meta.slideName}</div>
+        </div>
+        <div class="metadata-info-card">
+          <div class="metadata-card-label">Folder Name</div>
+          <div class="metadata-card-value" style="font-family: monospace;">${meta.folderName}</div>
+        </div>
+        <div class="metadata-info-card">
+          <div class="metadata-row">
+            <span class="metadata-card-label" style="letter-spacing: 0.8px;">Compile Type</span>
+            <span style="background: ${getBadgeColor(meta.type)}; padding: 5px 12px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; color: #080c14; text-transform: uppercase; letter-spacing: 0.8px;">${meta.type.replace(/_/g, ' ')}</span>
+          </div>
+        </div>
+        ${meta.sharedType ? `
+        <div class="metadata-info-card">
+          <div class="metadata-row">
+            <span class="metadata-card-label" style="letter-spacing: 0.8px;">Shared Popup Type</span>
+            <span style="background: ${getSharedBadgeColor(meta.sharedType)}; padding: 5px 12px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; color: #080c14; text-transform: uppercase; letter-spacing: 0.8px;">${meta.sharedType}</span>
+          </div>
+        </div>
+        ` : ''}
+        ${meta.parentPopup ? `
+        <div class="metadata-info-card">
+          <div class="metadata-card-label">Parent Slide Popup</div>
+          <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 2px;">
+            <div style="font-size: 0.85rem; color: var(--accent-pink); font-weight: 600;">ID: <span style="font-family: monospace; color: var(--text-light); font-weight: normal; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px;">${meta.parentPopup.id || 'N/A'}</span></div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); word-break: break-all; font-family: monospace;">Class: ${meta.parentPopup.className || 'N/A'}</div>
+          </div>
+        </div>
+        ` : ''}
+        <div class="metadata-info-card">
+          <div class="metadata-card-label">Compiled Time</div>
+          <div class="metadata-card-value" style="font-size: 0.85rem; color: var(--text-muted); font-weight: normal;">${new Date(meta.timestamp).toLocaleString()}</div>
+        </div>
+      `;
+
+      if (meta.openPopups && meta.openPopups.length > 0) {
+        html += `
+          <div style="margin-top: 8px; font-weight: 700; color: var(--text-light); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px; margin-bottom: 4px;">Active Popups Stack (${meta.openPopups.length})</div>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            ${meta.openPopups.map((p, idx) => `
+              <div style="background: rgba(255,255,255,0.01); border: 1px solid rgba(255,255,255,0.03); border-left: 4px solid ${p.type === 'slide_popup' ? 'var(--accent-pink)' : '#00f2fe'}; border-radius: 0 8px 8px 0; padding: 12px 16px; display: flex; flex-direction: column; gap: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; font-weight: 600;">
+                  <span style="color: var(--text-light); font-family: monospace;">#${p.id || 'Unnamed Element'}</span>
+                  <span style="background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 6px; color: var(--text-muted); font-size: 0.7rem; font-family: monospace;">z: ${p.zIndex}</span>
+                </div>
+                ${p.className ? `<div style="font-size: 0.75rem; color: var(--text-muted); word-break: break-all; font-family: monospace; line-height: 1.3;">.${p.className.trim().replace(/\s+/g, '.')}</div>` : ''}
+                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px;">Role: <span style="color: ${p.type === 'slide_popup' ? 'var(--accent-pink)' : '#00f2fe'}; font-weight: 700;">${p.type.replace(/_/g, ' ')}</span></div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+    }
+  } catch (err) {
+    html = `<div style="text-align: center; color: var(--accent-pink); padding: 24px; font-family: 'Plus Jakarta Sans', sans-serif;">Failed to parse compiled metadata block: ${err.message}</div>`;
+  }
+
+  metadataContent.innerHTML = html;
+  metadataViewer.style.display = 'flex';
+
+  const closeHandler = () => {
+    metadataViewer.style.display = 'none';
+    btnCloseMetadata.removeEventListener('click', closeHandler);
+  };
+  btnCloseMetadata.addEventListener('click', closeHandler);
+}
+
+// ─── PDF Viewer ──────────────────────────────────────────────────────────────
+function openPDFViewer(pdf) {
+  const idx = state.compiledPDFs.findIndex(p => p.name === pdf.name);
+  state.currentViewerPDFIndex = idx;
+
+  pdfViewerTitleText.innerText = pdf.name;
+  pdfViewerFrame.src = pdf.serveUrl;
+  pdfViewer.style.display = 'flex';
+
+  updatePDFViewerNavigation();
+}
+
+function updatePDFViewerNavigation() {
+  const btnPdfPrev = document.querySelector('#btn-pdf-prev');
+  const btnPdfNext = document.querySelector('#btn-pdf-next');
+  const pdfViewerCounter = document.querySelector('#pdf-viewer-counter');
+
+  if (state.currentViewerPDFIndex === -1 || state.compiledPDFs.length === 0) {
+    btnPdfPrev.setAttribute('disabled', 'true');
+    btnPdfNext.setAttribute('disabled', 'true');
+    pdfViewerCounter.innerText = '0 / 0';
+    return;
+  }
+
+  pdfViewerCounter.innerText = `${state.currentViewerPDFIndex + 1} / ${state.compiledPDFs.length}`;
+
+  if (state.currentViewerPDFIndex <= 0) {
+    btnPdfPrev.setAttribute('disabled', 'true');
+  } else {
+    btnPdfPrev.removeAttribute('disabled');
+  }
+
+  if (state.currentViewerPDFIndex >= state.compiledPDFs.length - 1) {
+    btnPdfNext.setAttribute('disabled', 'true');
+  } else {
+    btnPdfNext.removeAttribute('disabled');
+  }
+}
+
+document.querySelector('#btn-pdf-prev').addEventListener('click', () => {
+  if (state.currentViewerPDFIndex > 0) {
+    const prevPdf = state.compiledPDFs[state.currentViewerPDFIndex - 1];
+    openPDFViewer(prevPdf);
+  }
 });
 
-// Listen to Go backend EventsOn "compilation_progress"
+document.querySelector('#btn-pdf-next').addEventListener('click', () => {
+  if (state.currentViewerPDFIndex < state.compiledPDFs.length - 1) {
+    const nextPdf = state.compiledPDFs[state.currentViewerPDFIndex + 1];
+    openPDFViewer(nextPdf);
+  }
+});
+
+btnCloseViewer.addEventListener('click', () => {
+  pdfViewer.style.display = 'none';
+  pdfViewerFrame.src = '';
+  state.currentViewerPDFIndex = -1;
+});
+
+// Close viewer on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && pdfViewer.style.display !== 'none') {
+    pdfViewer.style.display = 'none';
+    pdfViewerFrame.src = '';
+  }
+});
+
+// ─── Backend Progress Events ─────────────────────────────────────────────────
 EventsOn('compilation_progress', (data) => {
-  // data contains {current, total, slide, phase}
   if (!state.isCompiling) return;
   
   const percentage = Math.round((data.current / data.total) * 100);
   
   if (data.phase === 'rendering') {
-    progressStatusText.innerHTML = `Rendering page <span>${data.current}/${data.total}</span>: <span>${data.slide}</span>`;
-    progressIndicator.style.width = `${percentage * 0.9}%`; // Leave 10% for merge phase
+    progressStatusText.innerHTML = `Rendering <span>${data.current}/${data.total}</span>: <span>${data.slide}</span>`;
+    progressIndicator.style.width = `${percentage * 0.9}%`;
     progressPercentage.innerText = `${Math.round(percentage * 0.9)}%`;
   } else if (data.phase === 'merging') {
-    progressStatusText.innerHTML = `Merging all slide vector pages...`;
+    progressStatusText.innerHTML = 'Merging slide pages...';
     progressIndicator.style.width = '95%';
     progressPercentage.innerText = '95%';
   }

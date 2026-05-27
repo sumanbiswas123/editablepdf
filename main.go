@@ -29,6 +29,9 @@ func main() {
 		OnShutdown: func(ctx context.Context) {
 			app.CleanUpServer()
 		},
+		Debug: options.Debug{
+			OpenInspectorOnStartup: false,
+		},
 		Bind: []interface{}{
 			app,
 		},
