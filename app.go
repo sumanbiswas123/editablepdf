@@ -46,6 +46,13 @@ type App struct {
 	server     *http.Server
 	serverPort int
 	currentDir string
+
+	// PDF session state (used by StartPDFSession / CompileSingleStateToPDF / EndPDFSession)
+	pdfCtx              context.Context
+	pdfCancel           context.CancelFunc
+	pdfAllocatorCancel  context.CancelFunc
+	pdfTempDir          string
+	pdfPaths            []string
 }
 
 // NewApp creates a new App application struct
@@ -174,6 +181,26 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
 				injection := `
 <script>
 (function() {
+
+  // Force quicklinks stylesheet injection
+  try {
+    var injectStyles = function() {
+      try {
+        var target = document.head || document.documentElement;
+        if (target && !document.getElementById('pdf-override-styles')) {
+          var style = document.createElement('style');
+          style.id = 'pdf-override-styles';
+          style.innerHTML = ' .navBottom, .bottomnav { display: flex !important; visibility: visible !important; opacity: 1 !important; z-index: 9999999 !important; pointer-events: auto !important; } ';
+          target.appendChild(style);
+        }
+      } catch(_) {}
+    };
+    injectStyles();
+    window.addEventListener('DOMContentLoaded', injectStyles);
+    window.addEventListener('load', injectStyles);
+    setInterval(injectStyles, 100);
+  } catch(_) {}
+
   var lastUrl = window.location.href;
   function checkUrl() {
     if (window.location.href !== lastUrl) {
@@ -196,96 +223,183 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
 })();
 
 window.addEventListener('message', function(e) {
-  if (e.data !== 'request_html') return;
-
-  // 1. Locate the topmost active popup in standard DOM (excluding backdrop overlays)
-  var topActivePopup = null;
-  var maxZ = -1;
-  function findActivePopups(node) {
-    if (!node) return;
-    if (node.nodeType === 1) {
-      var cs = window.getComputedStyle(node);
-      var isVisible = cs.display !== 'none' && cs.visibility !== 'hidden' &&
-                      node.offsetWidth > 0 && node.offsetHeight > 0;
-      if (isVisible) {
-        var nameStr = (node.className || '') + ' ' + (node.id || '');
-        // Exclude dark backdrop overlays so we detect the actual text container popup
-        var isPopupName = /popup|modal|dialog|ref|window|pi|si|layer|pop/i.test(nameStr);
-        var isOverlay = /overlay|backdrop|bg-dim|blocker/i.test(nameStr);
-        
-        if (isPopupName && !isOverlay) {
-          var z = parseInt(cs.zIndex) || 0;
-          if (z > maxZ) {
-            maxZ = z;
-            topActivePopup = node;
+  // ─── Handle: request_html (DOM capture for PDF compilation) ───
+  if (e.data === 'request_html') {
+    // 1. Locate the topmost active popup in standard DOM (excluding backdrop overlays)
+    var topActivePopup = null;
+    var maxZ = -1;
+    function findActivePopups(node) {
+      if (!node) return;
+      if (node.nodeType === 1) {
+        var cs = window.getComputedStyle(node);
+        var isVisible = cs.display !== 'none' && cs.visibility !== 'hidden' &&
+                        node.offsetWidth > 0 && node.offsetHeight > 0;
+        if (isVisible) {
+          var nameStr = (node.className || '') + ' ' + (node.id || '');
+          var isPopupName = /popup|modal|dialog|ref|window|pi|si|layer|pop/i.test(nameStr);
+          var isOverlay = /overlay|backdrop|bg-dim|blocker/i.test(nameStr);
+          if (isPopupName && !isOverlay) {
+            var z = parseInt(cs.zIndex) || 0;
+            if (z > maxZ) {
+              maxZ = z;
+              topActivePopup = node;
+            }
           }
         }
       }
+      Array.from(node.childNodes || []).forEach(findActivePopups);
     }
-    Array.from(node.childNodes || []).forEach(findActivePopups);
-  }
-  try {
-    findActivePopups(document.documentElement);
-  } catch (_) {}
+    try { findActivePopups(document.documentElement); } catch (_) {}
 
-  // 2. Clone document natively (since slides use standard DOM and jQuery UI)
-  var docClone = document.documentElement.cloneNode(true);
+    var docClone = document.documentElement.cloneNode(true);
+    if (topActivePopup) {
+      topActivePopup.setAttribute('data-pdf-active-popup', 'true');
+      var freshClone = document.documentElement.cloneNode(true);
+      topActivePopup.removeAttribute('data-pdf-active-popup');
+      docClone = freshClone;
+    }
 
-  // 3. Tag active popup surgically so the backend screenshot engine can identify and isolate it in the clone
-  if (topActivePopup) {
-    topActivePopup.setAttribute('data-pdf-active-popup', 'true');
-    var freshClone = document.documentElement.cloneNode(true);
-    topActivePopup.removeAttribute('data-pdf-active-popup');
-    docClone = freshClone;
-  }
-
-  // 4. Inject helper span ONLY into cloned document (preserving justification spacing fix!)
-  // We scan standard styleSheets dynamically inside the live page to locate rules targeted by the spacing hack.
-  var targetSelectors = new Set();
-  try {
-    Array.from(document.styleSheets).forEach(function(sheet) {
-      try {
-        var rules = sheet.cssRules || sheet.rules || [];
-        Array.from(rules).forEach(function(rule) {
-          if (!rule.selectorText) return;
-          if (rule.selectorText.indexOf(':after') !== -1 || rule.selectorText.indexOf('::after') !== -1) {
-            var display = rule.style.display || '';
-            var width = rule.style.width || '';
-            var cssText = rule.style.cssText || '';
-            var isInlineBlock = display === 'inline-block' || cssText.indexOf('display: inline-block') !== -1;
-            var isWidth100 = width === '100%' || cssText.indexOf('width: 100%') !== -1;
-            if (isInlineBlock && isWidth100) {
-              var baseSelector = rule.selectorText.replace(/::?after/g, '').trim();
-              if (baseSelector) targetSelectors.add(baseSelector);
+    var targetSelectors = new Set();
+    try {
+      Array.from(document.styleSheets).forEach(function(sheet) {
+        try {
+          var rules = sheet.cssRules || sheet.rules || [];
+          Array.from(rules).forEach(function(rule) {
+            if (!rule.selectorText) return;
+            if (rule.selectorText.indexOf(':after') !== -1 || rule.selectorText.indexOf('::after') !== -1) {
+              var display = rule.style.display || '';
+              var width = rule.style.width || '';
+              var cssText = rule.style.cssText || '';
+              var isInlineBlock = display === 'inline-block' || cssText.indexOf('display: inline-block') !== -1;
+              var isWidth100 = width === '100%' || cssText.indexOf('width: 100%') !== -1;
+              if (isInlineBlock && isWidth100) {
+                var baseSelector = rule.selectorText.replace(/::?after/g, '').trim();
+                if (baseSelector) targetSelectors.add(baseSelector);
+              }
             }
+          });
+        } catch (_) {}
+      });
+    } catch (_) {}
+
+    targetSelectors.forEach(function(selector) {
+      try {
+        docClone.querySelectorAll(selector).forEach(function(el) {
+          var hasText = Array.from(el.childNodes).some(function(n) {
+            return n.nodeType === 3 && n.nodeValue.trim().length > 0;
+          });
+          if (hasText && !el.querySelector('.pdf-justify-helper')) {
+            var helper = document.createElement('span');
+            helper.className = 'pdf-justify-helper';
+            helper.style.cssText = 'display: inline-block !important; width: 100% !important; font-size: inherit !important; line-height: inherit !important; margin: 0 !important; padding: 0 !important;';
+            helper.innerHTML = '&nbsp;';
+            el.appendChild(helper);
           }
         });
       } catch (_) {}
     });
-  } catch (_) {}
 
-  targetSelectors.forEach(function(selector) {
+    window.parent.postMessage({ type: 'captured_html', html: docClone.outerHTML }, '*');
+    return;
+  }
+
+  // ─── Handle: iframe_execute (run arbitrary JS and return result) ───
+  if (e.data && e.data.type === 'iframe_execute') {
+    var id = e.data.id;
+    var code = e.data.code;
     try {
-      docClone.querySelectorAll(selector).forEach(function(el) {
-        var hasText = Array.from(el.childNodes).some(function(n) {
-          return n.nodeType === 3 && n.nodeValue.trim().length > 0;
+      var result = (new Function('return (' + code + ')'))();
+      // If result is a Promise (async code), wait for it
+      if (result && typeof result === 'object' && typeof result.then === 'function') {
+        result.then(function(val) {
+          window.parent.postMessage({ type: 'iframe_execute_result', id: id, result: val }, '*');
+        }).catch(function(err) {
+          window.parent.postMessage({ type: 'iframe_execute_result', id: id, error: err.message || String(err) }, '*');
         });
-        if (hasText && !el.querySelector('.pdf-justify-helper')) {
-          var helper = document.createElement('span');
-          helper.className = 'pdf-justify-helper';
-          helper.style.cssText = 'display: inline-block !important; width: 100% !important; font-size: inherit !important; line-height: inherit !important; margin: 0 !important; padding: 0 !important;';
-          helper.innerHTML = '&nbsp;';
-          el.appendChild(helper);
-        }
-      });
-    } catch (_) {}
-  });
+      } else {
+        window.parent.postMessage({ type: 'iframe_execute_result', id: id, result: result }, '*');
+      }
+    } catch (err) {
+      window.parent.postMessage({ type: 'iframe_execute_result', id: id, error: err.message || String(err) }, '*');
+    }
+    return;
+  }
 
-  // Return the cloned outerHTML to Wails parent frame
-  window.parent.postMessage({
-    type: 'captured_html',
-    html: docClone.outerHTML
-  }, '*');
+  // ─── Handle: iframe_click (click element by CSS selector) ───
+  if (e.data && e.data.type === 'iframe_click') {
+    var selector = e.data.selector;
+    try {
+      var el = document.querySelector(selector);
+      if (el) {
+        var opts = { bubbles: true, cancelable: true, view: window };
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        el.dispatchEvent(new MouseEvent('mouseup', opts));
+        el.dispatchEvent(new MouseEvent('click', opts));
+        // Also try .click() for jQuery-bound handlers
+        try { el.click(); } catch(_) {}
+        window.parent.postMessage({ type: 'iframe_click_result', success: true }, '*');
+      } else {
+        window.parent.postMessage({ type: 'iframe_click_result', success: false }, '*');
+      }
+    } catch (err) {
+      window.parent.postMessage({ type: 'iframe_click_result', success: false }, '*');
+    }
+    return;
+  }
+
+  // ─── Handle: iframe_close_dialogs (close all visible popups/dialogs) ───
+  if (e.data && e.data.type === 'iframe_close_dialogs') {
+    try {
+      var closed = false;
+      // 1. Try jQuery UI dialog close buttons
+      document.querySelectorAll('.ui-dialog-titlebar-close').forEach(function(btn) {
+        try {
+          var dlg = btn.closest('.ui-dialog');
+          if (dlg && window.getComputedStyle(dlg).display !== 'none') {
+            btn.click();
+            closed = true;
+          }
+        } catch(_) {}
+      });
+      // 2. Try generic close buttons inside visible dialogs
+      document.querySelectorAll('.dialog .close, .dialog .closeBtn, [class*="close"], .dialog-close').forEach(function(btn) {
+        try {
+          var dlg = btn.closest('.dialog, [role="dialog"]');
+          if (dlg && window.getComputedStyle(dlg).display !== 'none') {
+            btn.click();
+            closed = true;
+          }
+        } catch(_) {}
+      });
+      // 3. Try jQuery .dialog('close') if available
+      if (typeof jQuery !== 'undefined' || typeof $ !== 'undefined') {
+        var jq = typeof jQuery !== 'undefined' ? jQuery : $;
+        try {
+          jq('.ui-dialog-content:visible').each(function() {
+            try { jq(this).dialog('close'); closed = true; } catch(_) {}
+          });
+        } catch(_) {}
+      }
+      // 4. Force-hide known overlay IDs (references, pi, isi, etc.)
+      ['#references', '#ref', '#pi', '#isi', '#si', '#bi', '#email', '#mail', '#mainpopup'].forEach(function(sel) {
+        try {
+          var el = document.querySelector(sel);
+          if (el && window.getComputedStyle(el).display !== 'none') {
+            el.style.display = 'none';
+            closed = true;
+          }
+        } catch(_) {}
+      });
+      // 5. Hide jQuery UI backdrop overlays
+      document.querySelectorAll('.ui-widget-overlay').forEach(function(o) {
+        try { o.style.display = 'none'; closed = true; } catch(_) {}
+      });
+      window.parent.postMessage({ type: 'iframe_close_result', success: closed }, '*');
+    } catch (err) {
+      window.parent.postMessage({ type: 'iframe_close_result', success: false }, '*');
+    }
+    return;
+  }
 });
 
 // 5. Headless Chrome Auto-Fix (runs ONLY inside the background PDF compiler browser instance)

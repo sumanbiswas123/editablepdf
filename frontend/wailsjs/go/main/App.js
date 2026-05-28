@@ -10,6 +10,14 @@ export function AutoCompileSlidePDF(arg1, arg2) {
   return window['go']['main']['App']['AutoCompileSlidePDF'](arg1, arg2);
 }
 
+export function AutomateActiveSlide(arg1, arg2) {
+  return window['go']['main']['App']['AutomateActiveSlide'](arg1, arg2);
+}
+
+export function AutomateDeck(arg1) {
+  return window['go']['main']['App']['AutomateDeck'](arg1);
+}
+
 export function CaptureCustomStateHTML(arg1, arg2) {
   return window['go']['main']['App']['CaptureCustomStateHTML'](arg1, arg2);
 }
@@ -26,8 +34,20 @@ export function CombineCompiledPDFs() {
   return window['go']['main']['App']['CombineCompiledPDFs']();
 }
 
+export function CompileDeckFromCaptures(arg1, arg2) {
+  return window['go']['main']['App']['CompileDeckFromCaptures'](arg1, arg2);
+}
+
 export function CompileScreenshot(arg1, arg2, arg3) {
   return window['go']['main']['App']['CompileScreenshot'](arg1, arg2, arg3);
+}
+
+export function CompileSingleStateToPDF(arg1, arg2) {
+  return window['go']['main']['App']['CompileSingleStateToPDF'](arg1, arg2);
+}
+
+export function CompileSlideFromCaptures(arg1, arg2) {
+  return window['go']['main']['App']['CompileSlideFromCaptures'](arg1, arg2);
 }
 
 export function CompileSlidesToIDML(arg1, arg2, arg3) {
@@ -40,6 +60,10 @@ export function CompileSlidesToPDF(arg1, arg2, arg3) {
 
 export function DeleteCompiledPDF(arg1) {
   return window['go']['main']['App']['DeleteCompiledPDF'](arg1);
+}
+
+export function EndPDFSession(arg1) {
+  return window['go']['main']['App']['EndPDFSession'](arg1);
 }
 
 export function EnsureOutputDir() {
@@ -74,6 +98,10 @@ export function ListCompiledPDFs() {
   return window['go']['main']['App']['ListCompiledPDFs']();
 }
 
+export function ScanActiveSlide(arg1) {
+  return window['go']['main']['App']['ScanActiveSlide'](arg1);
+}
+
 export function ScanAndStartServer(arg1) {
   return window['go']['main']['App']['ScanAndStartServer'](arg1);
 }
@@ -92,4 +120,8 @@ export function SelectSavePath(arg1) {
 
 export function SelectScreenshotSavePath(arg1) {
   return window['go']['main']['App']['SelectScreenshotSavePath'](arg1);
+}
+
+export function StartPDFSession() {
+  return window['go']['main']['App']['StartPDFSession']();
 }

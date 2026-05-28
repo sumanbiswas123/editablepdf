@@ -11,10 +11,168 @@ import {
   CompileSlidesToIDML,
   SelectIDMLSavePath,
   ListCombinedDecks,
-  CombineCompiledPDFs
+  CombineCompiledPDFs,
+  AutomateDeck,
+  AutomateActiveSlide,
+  ScanActiveSlide,
+  CompileSlideFromCaptures,
+  CompileDeckFromCaptures,
+  StartPDFSession,
+  CompileSingleStateToPDF,
+  EndPDFSession,
+  GenerateDeckAutoSavePath,
+  GenerateNextSequentialPDFPath
 } from '../wailsjs/go/main/App';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
+
+window.crawlerLogs = [];
+window.logToTextFile = function(msg) {
+  const timestamp = new Date().toLocaleTimeString();
+  const logMsg = `[${timestamp}] ${msg}`;
+  window.crawlerLogs.push(logMsg);
+  console.log(logMsg);
+};
+
+window.downloadCrawlerLogs = function() {
+  if (window.crawlerLogs.length === 0) return;
+  const blob = new Blob([window.crawlerLogs.join('\n')], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'crawler_log.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+// Helper to show modern confirmation modal for scanned automation triggers
+const showConfirmModal = (items, onConfirm, onCancel) => {
+  const backdrop = document.createElement('div');
+  backdrop.id = 'confirm-modal-backdrop';
+  backdrop.style.cssText = `
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(10, 15, 30, 0.7);
+    backdrop-filter: blur(12px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999999;
+    opacity: 0; transition: opacity 0.3s ease;
+  `;
+  
+  const copiableText = items.join('\n');
+  
+  const content = document.createElement('div');
+  content.style.cssText = `
+    background: linear-gradient(135deg, rgba(20, 30, 55, 0.95), rgba(10, 15, 30, 0.98));
+    border: 1px solid rgba(0, 242, 254, 0.15);
+    border-radius: 16px;
+    padding: 24px;
+    width: 90%; max-width: 500px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 242, 254, 0.05);
+    transform: translateY(20px); transition: transform 0.3s ease;
+    color: #e2e8f0;
+    font-family: 'Inter', sans-serif;
+  `;
+  
+  content.innerHTML = `
+    <h3 style="margin: 0 0 12px 0; color: #00f2fe; font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+      🔍 Scan Results: Slide Automation
+    </h3>
+    <p style="margin: 0 0 16px 0; font-size: 14px; color: #94a3b8; line-height: 1.5;">
+      We scanned the slide and detected the following states to capture. Please review the selectors/buttons below:
+    </p>
+    <div style="position: relative; margin-bottom: 20px;">
+      <textarea id="scan-list-textarea" readonly style="
+        width: 100%; height: 180px;
+        background: rgba(5, 10, 20, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 12px;
+        color: #38bdf8;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+        resize: none;
+        outline: none;
+        box-sizing: border-box;
+      ">${copiableText}</textarea>
+      <button id="btn-copy-scan-list" style="
+        position: absolute; right: 10px; bottom: 15px;
+        background: rgba(56, 189, 248, 0.15);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        color: #38bdf8;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      ">📋 Copy List</button>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 12px;">
+      <button id="btn-modal-cancel" style="
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: #94a3b8;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      ">Cancel</button>
+      <button id="btn-modal-proceed" style="
+        background: linear-gradient(90deg, #0072ff, #00f2fe);
+        border: none;
+        color: #fff;
+        padding: 10px 24px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 4px 15px rgba(0, 242, 254, 0.3);
+        transition: all 0.2s ease;
+      ">Proceed</button>
+    </div>
+  `;
+  
+  backdrop.appendChild(content);
+  document.body.appendChild(backdrop);
+  
+  // Animate in
+  setTimeout(() => {
+    backdrop.style.opacity = '1';
+    content.style.transform = 'translateY(0)';
+  }, 10);
+  
+  const closeModal = () => {
+    backdrop.style.opacity = '0';
+    content.style.transform = 'translateY(20px)';
+    setTimeout(() => {
+      document.body.removeChild(backdrop);
+    }, 300);
+  };
+  
+  const copyBtn = content.querySelector('#btn-copy-scan-list');
+  copyBtn.addEventListener('click', () => {
+    const textarea = content.querySelector('#scan-list-textarea');
+    textarea.select();
+    document.execCommand('copy');
+    copyBtn.innerText = '✅ Copied!';
+    setTimeout(() => {
+      copyBtn.innerText = '📋 Copy List';
+    }, 2000);
+  });
+  
+  content.querySelector('#btn-modal-cancel').addEventListener('click', () => {
+    closeModal();
+    onCancel();
+  });
+  
+  content.querySelector('#btn-modal-proceed').addEventListener('click', () => {
+    closeModal();
+    onConfirm();
+  });
+};
 
 // ─── App State ───────────────────────────────────────────────────────────────
 let state = {
@@ -27,6 +185,7 @@ let state = {
   isCompiling: false,
   sleepMs: 800
 };
+
 
 // ─── Scaffold HTML ───────────────────────────────────────────────────────────
 document.querySelector('#app').innerHTML = `
@@ -165,6 +324,12 @@ document.querySelector('#app').innerHTML = `
       <button class="compile-btn" id="btn-compile" disabled>
         🚀 Compile Deck
       </button>
+      <button class="compile-btn" id="btn-automate-slide" style="background: linear-gradient(135deg, #ff9a9e, #fecfef); box-shadow: 0 4px 16px rgba(255, 154, 158, 0.3); color: #080c14; font-weight: 700;" disabled>
+        🤖 Automate Slide
+      </button>
+      <button class="compile-btn" id="btn-automate" style="background: linear-gradient(135deg, #a18cd1, #fbc2eb); box-shadow: 0 4px 16px rgba(161, 140, 209, 0.3);" disabled>
+        🤖 Automate Deck
+      </button>
     </div>
   </div>
 `;
@@ -174,6 +339,8 @@ const btnSelectDir = document.querySelector('#btn-select-dir');
 const btnCompile = document.querySelector('#btn-compile');
 const btnScreenshot = document.querySelector('#btn-screenshot');
 const btnIdml = document.querySelector('#btn-idml');
+const btnAutomate = document.querySelector('#btn-automate');
+const btnAutomateSlide = document.querySelector('#btn-automate-slide');
 const inputSleep = document.querySelector('#input-sleep');
 const sleepVal = document.querySelector('#sleep-val');
 const slideList = document.querySelector('#slide-list');
@@ -233,12 +400,16 @@ async function loadDirectory(dirPath) {
       btnCompile.removeAttribute('disabled');
       btnScreenshot.removeAttribute('disabled');
       btnIdml.removeAttribute('disabled');
+      btnAutomate.removeAttribute('disabled');
+      btnAutomateSlide.removeAttribute('disabled');
       loadSlide(0);
     } else {
       slideList.innerHTML = '<div class="slide-empty">No slide subfolders found.</div>';
       btnCompile.setAttribute('disabled', 'true');
       btnScreenshot.setAttribute('disabled', 'true');
       btnIdml.setAttribute('disabled', 'true');
+      btnAutomate.setAttribute('disabled', 'true');
+      btnAutomateSlide.setAttribute('disabled', 'true');
     }
     
     // Refresh PDF list for this presentation
@@ -282,6 +453,14 @@ function loadSlide(idx) {
   // Update counter
   slideCounter.innerText = `${idx + 1} / ${state.slides.length}`;
   
+  // Toggle vertical styling
+  const isVertical = slide.folderName && slide.folderName.toLowerCase().includes('vertical');
+  if (isVertical) {
+    canvasFrame.classList.add('vertical');
+  } else {
+    canvasFrame.classList.remove('vertical');
+  }
+  
   // Load slide URL
   slideIframe.src = slide.url;
 }
@@ -290,6 +469,11 @@ function loadSlide(idx) {
 // Captures secure postMessage slide navigation alerts sent by our bridge script inside the iframe.
 // This completely bypasses CORS restrictions and eliminates layout/indexing race conditions!
 window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'iframe_log') {
+    if (window.logToTextFile) window.logToTextFile("[IFRAME] " + e.data.message);
+    try { window.go.main.App.LogCrawlerStatus("[IFRAME] " + e.data.message); } catch(_) {}
+    return;
+  }
   if (e.data && e.data.type === 'iframe_navigation') {
     const loadedUrl = e.data.url;
     if (!loadedUrl || loadedUrl === 'about:blank') return;
@@ -440,6 +624,1487 @@ btnCompile.addEventListener('click', async () => {
   }
 });
 
+// ─── Iframe Automation Helpers ───────────────────────────────────────────────
+// These use the bridge script's postMessage handlers to interact with the live iframe
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Execute arbitrary JS inside the iframe and get the result back
+function executeInIframe(code) {
+  return new Promise((resolve, reject) => {
+    const id = Date.now() + '_' + Math.random().toString(36).slice(2);
+    const timeout = setTimeout(() => {
+      window.removeEventListener('message', handler);
+      reject(new Error('Iframe execute timed out'));
+    }, 8000);
+    
+    const handler = (e) => {
+      if (e.data && e.data.type === 'iframe_execute_result' && e.data.id === id) {
+        clearTimeout(timeout);
+        window.removeEventListener('message', handler);
+        if (e.data.error) reject(new Error(e.data.error));
+        else resolve(e.data.result);
+      }
+    };
+    
+    window.addEventListener('message', handler);
+    try {
+      slideIframe.contentWindow.postMessage({ type: 'iframe_execute', id, code }, '*');
+    } catch (err) {
+      clearTimeout(timeout);
+      window.removeEventListener('message', handler);
+      reject(err);
+    }
+  });
+}
+
+// Click an element inside the iframe by CSS selector
+function clickInIframe(selector) {
+  return executeInIframe(`(function() {
+    var el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return false;
+    
+    // Dispatch Touch events
+    var dispatchTouch = function(element, type) {
+      try {
+        var touch = {
+          identifier: Date.now(),
+          target: element,
+          clientX: 0,
+          clientY: 0,
+          screenX: 0,
+          screenY: 0,
+          pageX: 0,
+          pageY: 0
+        };
+        var touchList = [touch];
+        var evt;
+        try {
+          evt = new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            touches: type === 'touchstart' ? touchList : [],
+            targetTouches: type === 'touchstart' ? touchList : [],
+            changedTouches: touchList
+          });
+        } catch(e) {
+          evt = document.createEvent('TouchEvent');
+          evt.initEvent(type, true, true);
+          Object.defineProperty(evt, 'touches', { value: type === 'touchstart' ? touchList : [] });
+          Object.defineProperty(evt, 'targetTouches', { value: type === 'touchstart' ? touchList : [] });
+          Object.defineProperty(evt, 'changedTouches', { value: touchList });
+        }
+        element.dispatchEvent(evt);
+      } catch(err) {}
+    };
+    dispatchTouch(el, 'touchstart');
+    dispatchTouch(el, 'touchend');
+
+    // Dispatch Mouse events
+    var opts = { bubbles: true, cancelable: true, view: window };
+    el.dispatchEvent(new MouseEvent('mousedown', opts));
+    el.dispatchEvent(new MouseEvent('mouseup', opts));
+    el.dispatchEvent(new MouseEvent('click', opts));
+    
+    try { el.click(); } catch(_) {}
+    return true;
+  })()`);
+}
+
+// Close all open dialogs inside the iframe
+function closeIframeDialogs() {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      window.removeEventListener('message', handler);
+      resolve(false);
+    }, 4000);
+    
+    const handler = async (e) => {
+      if (e.data && e.data.type === 'iframe_close_result') {
+        clearTimeout(timeout);
+        window.removeEventListener('message', handler);
+        
+        // Wait for active dialogs to actually finish their close transitions (display: none)
+        let attempts = 0;
+        while (attempts < 20) {
+          const anyOpen = await executeInIframe(`(function() {
+            var selectors = ['.ui-dialog', '.dialog', '[role="dialog"]', '#references', '#ref', '#pi', '#isi', '#si', '#bi'];
+            for (var i = 0; i < selectors.length; i++) {
+              var els = document.querySelectorAll(selectors[i]);
+              for (var j = 0; j < els.length; j++) {
+                var el = els[j];
+                var style = window.getComputedStyle(el);
+                if (style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity) > 0.1) {
+                  var rect = el.getBoundingClientRect();
+                  if (rect.width > 150 && rect.height > 150) return true;
+                }
+              }
+            }
+            return false;
+          })()`);
+          if (!anyOpen) break;
+          await sleep(50);
+          attempts++;
+        }
+        resolve(e.data.success);
+      }
+    };
+    
+    window.addEventListener('message', handler);
+    try {
+      slideIframe.contentWindow.postMessage({ type: 'iframe_close_dialogs' }, '*');
+    } catch (_) {
+      clearTimeout(timeout);
+      window.removeEventListener('message', handler);
+      resolve(false);
+    }
+  });
+}
+
+// ─── Reusable: Automate One Slide via Live Iframe ────────────────────────────
+// Loads a slide in the iframe, scans triggers, clicks each, captures states on-the-fly.
+async function automateOneSlideViaIframe(slide, slideIndex, totalSlides, settleMs) {
+  if (window.logToTextFile) {
+    window.logToTextFile(`======================================================================`);
+    window.logToTextFile(`🚀 STARTING AUTOMATION RUN FOR SLIDE: ${slide.name} (Index ${slideIndex})`);
+    window.logToTextFile(`======================================================================`);
+  }
+  const isFirstSlide = slideIndex === 0;
+  const logLines = [];
+  
+  const updateProgress = (detail) => {
+    const pct = Math.round((slideIndex / totalSlides) * 100);
+    progressPercentage.innerText = `${pct}%`;
+    progressIndicator.style.width = `${pct}%`;
+    progressStatusText.innerText = `[${slideIndex + 1}/${totalSlides}] ${slide.name}: ${detail}`;
+  };
+
+  // Helper: load slide in iframe and wait for it
+  const loadSlideInIframe = () => new Promise((resolve) => {
+    slideIframe.onload = () => { slideIframe.onload = null; resolve(); };
+    slideIframe.src = slide.url;
+  });
+
+  // Helper: ensure all dialogs/popups inside iframe are closed before proceeding
+  const ensureAllClosed = async () => {
+    let attempts = 0;
+    while (attempts < 3) {
+      const anyOpen = await executeInIframe(`(function() {
+        var selectors = ['.ui-dialog', '.dialog', '[role="dialog"]', '#references', '#ref', '#pi', '#isi', '#si', '#bi'];
+        for (var i = 0; i < selectors.length; i++) {
+          var els = document.querySelectorAll(selectors[i]);
+          for (var j = 0; j < els.length; j++) {
+            var el = els[j];
+            var style = window.getComputedStyle(el);
+            if (style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity) > 0.1) {
+              var rect = el.getBoundingClientRect();
+              if (rect.width > 150 && rect.height > 150) return true;
+            }
+          }
+        }
+        return false;
+      })()`);
+      if (!anyOpen) return true;
+      await closeIframeDialogs();
+      await sleep(300);
+      attempts++;
+    }
+    return false;
+  };
+
+  const captureAndCompileState = async (desc) => {
+    const statusStr = await executeInIframe(`(function() {
+      var nav = document.querySelector('.navBottom');
+      var bnav = document.querySelector('.bottomnav');
+      var statusStr = "PDF CRAWLER STATE [${desc}]:";
+      if (!nav) {
+        statusStr += " [navBottom NOT FOUND]";
+      } else {
+        var cs = window.getComputedStyle(nav);
+        statusStr += " [navBottom parent=" + nav.parentNode.tagName + (nav.parentNode.id ? "#" + nav.parentNode.id : "") + " display=" + cs.display + " visibility=" + cs.visibility + " opacity=" + cs.opacity + " zIndex=" + cs.zIndex + "]";
+      }
+      if (!bnav) {
+        statusStr += " [bottomnav NOT FOUND]";
+      } else {
+        var cs2 = window.getComputedStyle(bnav);
+        statusStr += " [bottomnav parent=" + bnav.parentNode.tagName + " display=" + cs2.display + " visibility=" + cs2.visibility + " opacity=" + cs2.opacity + " zIndex=" + cs2.zIndex + "]";
+      }
+      return statusStr;
+    })()`);
+    console.log(statusStr);
+    try { window.go.main.App.LogCrawlerStatus(statusStr); } catch(_) {}
+    const html = await captureCurrentSlideState();
+    if (!html) return;
+    const job = {
+      slideName: slide.name,
+      folderName: slide.folderName,
+      url: slide.url,
+      customHtml: html
+    };
+    updateProgress(`📸 Rendering to PDF: ${desc}...`);
+    await CompileSingleStateToPDF(job, settleMs);
+  };
+  
+  // Toggle vertical styling
+  const isVertical = slide.folderName && slide.folderName.toLowerCase().includes('vertical');
+  if (isVertical) {
+    canvasFrame.classList.add('vertical');
+  } else {
+    canvasFrame.classList.remove('vertical');
+  }
+  
+  // Load the slide once
+  updateProgress('Loading slide...');
+  await loadSlideInIframe();
+  await sleep(settleMs);
+  
+  // A. Capture base slide state
+  updateProgress('📄 Capturing base state...');
+  await captureAndCompileState('Base Slide');
+  logLines.push(`📄 [${slide.name}] Base Slide`);
+
+  // B. If first slide: shared overlays (pi, references, menu, etc.)
+  if (isFirstSlide) {
+    const sharedIds = ['pi', 'references', 'menu', 'flowSelector', 'email', 'objection', 'quickres'];
+    for (const sid of sharedIds) {
+      try {
+        const isVisible = await executeInIframe(`(function() {
+          var el = document.querySelector('#${sid}');
+          if (!el) return false;
+          if (el.classList.contains('inactive') || el.classList.contains('disabled')) return false;
+          var style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0' || style.pointerEvents === 'none') return false;
+          if (parseFloat(style.opacity) < 0.6) return false;
+          var rect = el.getBoundingClientRect();
+          if (rect.width <= 5 || rect.height <= 5) return false;
+          return true;
+        })()`);
+        
+        if (isVisible) {
+          updateProgress(`🔗 Opening #${sid}...`);
+          
+          // Exception for first slide: reload for 'pi' and 'references' to restore clean state before opening
+          if (sid === 'pi' || sid === 'references') {
+            await loadSlideInIframe();
+            await sleep(settleMs);
+          } else {
+            await ensureAllClosed();
+          }
+          
+          await clickInIframe('#' + sid);
+          await sleep(settleMs);
+          
+          updateProgress(`📸 Capturing #${sid}...`);
+          await captureAndCompileState(`Shared #${sid}`);
+          logLines.push(`🔗 [${slide.name}] Shared: #${sid}`);
+          
+          await closeIframeDialogs();
+          await sleep(400);
+        }
+      } catch (_) {}
+    }
+  } else {
+    // C. Non-first slides: Slide-level references
+    try {
+      const hasRef = await executeInIframe(`(function() {
+        var ref = document.querySelector('#references');
+        if (ref) {
+          var isInactive = ref.classList.contains('inactive') || ref.classList.contains('disabled');
+          var style = window.getComputedStyle(ref);
+          var isHidden = style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0' || parseFloat(style.opacity) < 0.5;
+          if (!isInactive && !isHidden) return 'nav';
+        }
+        var ref2 = document.querySelector('.gotoRef, [data-reftarget]');
+        if (!ref2) return false;
+        if (ref2.closest('.dialog') || ref2.closest('.ui-dialog')) return false;
+        return 'gotoRef';
+      })()`);
+      
+      if (hasRef) {
+        updateProgress('📚 Opening references...');
+        
+        // Ensure clean state before clicking (reload slide)
+        await loadSlideInIframe();
+        await sleep(settleMs);
+        
+        const refSelector = hasRef === 'nav' ? '#references' : '.gotoRef, [data-reftarget]';
+        await clickInIframe(refSelector);
+        await sleep(settleMs);
+        
+        updateProgress('📸 Capturing references...');
+        await captureAndCompileState('References');
+        logLines.push(`📚 [${slide.name}] References`);
+        
+        await closeIframeDialogs();
+        await sleep(400);
+      }
+    } catch (_) {}
+  }
+  
+
+  
+  // D. Tab Buttons (Internal Switches) & Dialog Popups (for ALL slides)
+  // activateTabInfo: { selector, dataTab, dataNum } — from the outer tab scan
+  let currentTabInfo = null; // set before each scanAndProcessDialogs call
+  const activateTabIfNeeded = async (tabSelector) => {
+    if (!tabSelector) return;
+    // Strategy 1: Use data-tab attribute for reliable, class-independent switching
+    // (avoids breakage from dynamically-added 'needsclick' or state classes after reload)
+    const switched = await executeInIframe(`(function() {
+      var info = ${JSON.stringify(currentTabInfo || {})};
+      var el = null;
+      // Try data-tab first (most reliable)
+      if (info.dataTab) {
+        el = document.querySelector('[data-tab="' + info.dataTab + '"]');
+      }
+      // Try data-num as fallback
+      if (!el && info.dataNum) {
+        el = document.querySelector('[data-num="' + info.dataNum + '"]');
+      }
+      // Fall back to original CSS selector
+      if (!el) {
+        try { el = document.querySelector(info.selector || ''); } catch(_) {}
+      }
+      if (!el) return false;
+      
+      // If already active, do not click/trigger to avoid toggling off (e.g. toggleClass)
+      var isAlreadyActive = el.classList.contains('active') || 
+                            el.classList.contains('active_tab') || 
+                            el.classList.contains('tabActive') || 
+                            el.classList.contains('selected') || 
+                            el.className.indexOf('active') !== -1;
+      if (isAlreadyActive) return true;
+
+      // Dispatch events to trigger jQuery handler
+      var opts = { bubbles: true, cancelable: true, view: window };
+      el.dispatchEvent(new MouseEvent('mousedown', opts));
+      el.dispatchEvent(new MouseEvent('mouseup', opts));
+      el.dispatchEvent(new MouseEvent('click', opts));
+      try { el.click(); } catch(_) {}
+      return true;
+    })()`);
+    // Wait for tab content to settle (animations, show/hide transitions)
+    await sleep(Math.max(settleMs, 600));
+  };
+
+  const scanAndProcessDialogs = async (contextLabel, tabSelector) => {
+    const triggers = await executeInIframe(`(function() {
+      var sharedIDs = ['pi', 'references', 'menu', 'flowSelector', 'email', 'objection', 'quickres', 'home'];
+      var elements = Array.from(document.querySelectorAll('.openDialog, [data-dialog], .dialog-btn, .boxtxtbtn_click, .boxtxtbtn')).filter(function(el) {
+        if (sharedIDs.indexOf(el.id) !== -1) return false;
+        var style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        var rect = el.getBoundingClientRect();
+        if (rect.width <= 2 || rect.height <= 2) return false;
+        return true;
+      });
+      var seenTargets = {};
+      var uniqueTriggers = [];
+      function getUniqueSelector(el) {
+        if (el.id) return '#' + el.id;
+        var path = [];
+        var curr = el;
+        while (curr && curr.nodeType === Node.ELEMENT_NODE) {
+          var selector = curr.nodeName.toLowerCase();
+          if (curr.id) {
+            selector = '#' + curr.id;
+            path.unshift(selector);
+            break;
+          }
+          if (curr.className) {
+            var classes = Array.from(curr.classList).filter(function(c) {
+              c = c.trim();
+              if (c === '') return false;
+              var lower = c.toLowerCase();
+              return !(
+                lower === 'needsclick' ||
+                lower === 'trackingsubmitted' ||
+                lower.indexOf('active') !== -1 ||
+                lower.indexOf('current') !== -1 ||
+                lower.indexOf('next') !== -1 ||
+                lower.indexOf('prev') !== -1 ||
+                lower.indexOf('disabled') !== -1 ||
+                lower.indexOf('inactive') !== -1 ||
+                lower.indexOf('focus') !== -1 ||
+                /^tab\d+$/.test(lower)
+              );
+            }).join('.');
+            if (classes) selector += '.' + classes;
+          }
+          var sibling = curr;
+          var nth = 1;
+          while (sibling = sibling.previousElementSibling) {
+            if (sibling.nodeName === curr.nodeName) nth++;
+          }
+          selector += ":nth-of-type(" + nth + ")";
+          path.unshift(selector);
+          curr = curr.parentNode;
+        }
+        return path.join(' > ');
+      }
+      elements.forEach(function(el) {
+        var target = el.getAttribute('data-dialog') || el.getAttribute('data-target') || "";
+        if (!target) {
+          var href = el.getAttribute('href') || "";
+          if (href.startsWith('#')) target = href;
+        }
+        if (!target) target = "generic_" + (el.id || el.className || Math.random());
+        if (!seenTargets[target]) {
+          seenTargets[target] = true;
+          uniqueTriggers.push({
+            selector: getUniqueSelector(el),
+            id: el.id || "",
+            targetDialog: target,
+            description: el.getAttribute('data-description') || el.innerText || ""
+          });
+        }
+      });
+      return uniqueTriggers;
+    })()`);
+
+    if (triggers && triggers.length > 0) {
+      for (let i = 0; i < triggers.length; i++) {
+        const t = triggers[i];
+        const label = t.description || t.id || t.targetDialog || `Popup ${i + 1}`;
+        
+        updateProgress(`💬 Popup ${i + 1}/${triggers.length} (${contextLabel}): ${label}...`);
+        
+        // Ensure perfect clean state before clicking this dialog trigger (reload slide)
+        await loadSlideInIframe();
+        await sleep(settleMs);
+        // Make sure tab is active
+        await activateTabIfNeeded(tabSelector);
+        
+        await clickInIframe(t.selector);
+        await sleep(settleMs);
+
+        const clickDialogTab = async (tabInfo) => {
+          if (!tabInfo) return;
+          
+          // Log start of process
+          try {
+            window.go.main.App.LogCrawlerStatus("[CRAWLER] clickDialogTab starting for: " + tabInfo.label + " | selector=" + tabInfo.selector + " | dataTab=" + tabInfo.dataTab);
+          } catch(_) {}
+
+          const clicked = await executeInIframe(`(function() {
+            var info = ${JSON.stringify(tabInfo)};
+            var el = null;
+            var openDialog = Array.from(document.querySelectorAll('.dialog, .ui-dialog')).filter(function(d) {
+              return window.getComputedStyle(d).display !== 'none';
+            })[0];
+            var searchRoot = openDialog || document;
+
+            if (info.id) el = document.getElementById(info.id);
+            if (!el && info.dataTab) {
+              el = searchRoot.querySelector('[data-tab="' + info.dataTab + '"], [data-num="' + info.dataTab + '"]');
+            }
+            if (!el && info.selector) {
+              try { el = searchRoot.querySelector(info.selector); } catch(_) {}
+              if (!el) {
+                try { el = document.querySelector(info.selector); } catch(_) {}
+              }
+            }
+            // Fallback: search by data-description or text content within the active dialog
+            if (!el && info.label) {
+              var candidates = searchRoot.querySelectorAll('.Page_tabBtn, .tabBtn, .tab-btn, .tab-button, .toptab, .bottomtab, .pop3tab, .tabSwitch div, [data-tab], [data-num], [class*="tab"], [data-description]');
+              for (var idx = 0; idx < candidates.length; idx++) {
+                var cand = candidates[idx];
+                var candDesc = cand.getAttribute('data-description') || cand.getAttribute('data-desc') || "";
+                if (candDesc && (candDesc === info.label || info.label.indexOf(candDesc) !== -1 || candDesc.indexOf(info.label) !== -1)) {
+                  el = cand;
+                  break;
+                }
+                var candText = cand.innerText.trim();
+                if (candText && (candText === info.label || info.label.indexOf(candText) !== -1 || candText.indexOf(info.label) !== -1)) {
+                  el = cand;
+                  break;
+                }
+              }
+            }
+            
+            if (!el) {
+              try {
+                window.parent.postMessage({
+                  type: 'iframe_log',
+                  message: 'Element NOT found for tab ' + info.label + '. Candidates inside open dialog: ' + 
+                    Array.from(searchRoot.querySelectorAll('.Page_tabBtn, .tabBtn, .tab-btn, .tab-button, .toptab, .bottomtab, .pop3tab, .tabSwitch div')).map(function(c) {
+                      return "'" + c.innerText.trim() + "' (" + c.className + ")";
+                    }).join(', ')
+                }, '*');
+              } catch(_) {}
+              return false;
+            }
+            
+            // If already active, do not click/trigger to avoid toggling off (e.g. toggleClass)
+            var isAlreadyActive = el.classList.contains('active') || 
+                                  el.classList.contains('active_tab') || 
+                                  el.classList.contains('tabActive') || 
+                                  el.classList.contains('selected') || 
+                                  el.className.indexOf('active') !== -1;
+            
+            try {
+              window.parent.postMessage({
+                type: 'iframe_log',
+                message: 'Element FOUND: tagName=' + el.tagName + ' className="' + el.className + '" isAlreadyActive=' + isAlreadyActive
+              }, '*');
+            } catch(_) {}
+
+            if (isAlreadyActive) return true;
+
+            // Dispatch Touch events
+            var dispatchTouch = function(element, type) {
+              try {
+                var touch = {
+                  identifier: Date.now(),
+                  target: element,
+                  clientX: 0,
+                  clientY: 0,
+                  screenX: 0,
+                  screenY: 0,
+                  pageX: 0,
+                  pageY: 0
+                };
+                var touchList = [touch];
+                var evt;
+                try {
+                  evt = new TouchEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    touches: type === 'touchstart' ? touchList : [],
+                    targetTouches: type === 'touchstart' ? touchList : [],
+                    changedTouches: touchList
+                  });
+                } catch(e) {
+                  evt = document.createEvent('TouchEvent');
+                  evt.initEvent(type, true, true);
+                  Object.defineProperty(evt, 'touches', { value: type === 'touchstart' ? touchList : [] });
+                  Object.defineProperty(evt, 'targetTouches', { value: type === 'touchstart' ? touchList : [] });
+                  Object.defineProperty(evt, 'changedTouches', { value: touchList });
+                }
+                element.dispatchEvent(evt);
+              } catch(err) {}
+            };
+            dispatchTouch(el, 'touchstart');
+            dispatchTouch(el, 'touchend');
+
+            var opts = { bubbles: true, cancelable: true, view: window };
+            el.dispatchEvent(new MouseEvent('mousedown', opts));
+            el.dispatchEvent(new MouseEvent('mouseup', opts));
+            el.dispatchEvent(new MouseEvent('click', opts));
+            try { el.click(); } catch(_) {}
+            return true;
+          })()`);
+          return clicked;
+        };
+
+        // Helper: restore dialog and re-click correct page/subtab to get a 100% clean slide state
+        const restoreDialogAndOpenDot = async (dotSelector = null, subTabInfo = null, tabsAreInner = false, targetDotIdx = null) => {
+          updateProgress(`🔄 Restoring clean dialog state...`);
+          await loadSlideInIframe();
+          await sleep(settleMs);
+          await activateTabIfNeeded(tabSelector);
+          await clickInIframe(t.selector);
+          await sleep(settleMs);
+          
+          const waitForDotTransition = async (targetIdx) => {
+            if (targetIdx === null) return;
+            await executeInIframe(`(function() {
+              return new Promise(function(resolve) {
+                var targetIdx = ${targetIdx};
+                var deadline = Date.now() + 1500; // max 1.5s wait
+                function check() {
+                  var openDialog = Array.from(document.querySelectorAll('.dialog, .ui-dialog')).filter(function(d) {
+                    return window.getComputedStyle(d).display !== 'none';
+                  })[0];
+                  if (!openDialog) { resolve(); return; }
+                  var slides = Array.from(openDialog.querySelectorAll('.swiper-slide'));
+                  var activeIdx = slides.findIndex(function(s) { return s.classList.contains('swiper-slide-active'); });
+                  if (activeIdx === targetIdx || Date.now() > deadline) {
+                    resolve();
+                  } else {
+                    setTimeout(check, 50);
+                  }
+                }
+                check();
+              });
+            })()`);
+          };
+
+          if (tabsAreInner) {
+            // Dots (slides) are Outer, Tabs are Inner -> Click Slide dot first, then click Tab!
+            if (dotSelector) {
+              await clickInIframe(dotSelector);
+              await waitForDotTransition(targetDotIdx);
+              await sleep(settleMs);
+            }
+            if (subTabInfo) {
+              if (typeof subTabInfo === 'string') {
+                await clickInIframe(subTabInfo);
+              } else {
+                await clickDialogTab(subTabInfo);
+              }
+              await sleep(settleMs);
+            }
+          } else {
+            // Tabs are Outer, Dots are Inner -> Click Tab first, then click Slide dot!
+            if (subTabInfo) {
+              if (typeof subTabInfo === 'string') {
+                await clickInIframe(subTabInfo);
+              } else {
+                await clickDialogTab(subTabInfo);
+              }
+              await sleep(settleMs);
+            }
+            if (dotSelector) {
+              await clickInIframe(dotSelector);
+              await waitForDotTransition(targetDotIdx);
+              await sleep(settleMs);
+            }
+          }
+        };
+
+        // Helper: Check and capture nested references inside current active state
+        const checkAndCaptureNestedRef = async (stateLabel) => {
+          try {
+            const checkNested = await executeInIframe(`(function() {
+              var openDialog = Array.from(document.querySelectorAll('.dialog, .ui-dialog')).filter(function(d) {
+                return window.getComputedStyle(d).display !== 'none';
+              })[0];
+              if (!openDialog) return { hasNestedRef: false, isCurrentDialogRefOrPi: false };
+              
+              var id = openDialog.id || "";
+              var classes = openDialog.className || "";
+              var isRefOrPi = (
+                id === 'references' || id === 'ref' || id === 'pi' || id === 'isi' || id === 'si' || id === 'bi' ||
+                classes.indexOf('references') !== -1 || classes.indexOf('pi') !== -1
+              );
+              
+              var refBtn = openDialog.querySelector('.gotoRef, [data-reftarget]');
+              return {
+                hasNestedRef: refBtn !== null,
+                isCurrentDialogRefOrPi: isRefOrPi
+              };
+            })()`);
+            
+            if (checkNested && checkNested.hasNestedRef && !checkNested.isCurrentDialogRefOrPi) {
+              updateProgress(`📚 Nested ref in ${stateLabel}...`);
+              
+              // Click the global bottom navigation references button to perfectly match manual execution
+              await clickInIframe('#references');
+              await sleep(settleMs);
+              
+              await captureAndCompileState(`Nested Ref in ${stateLabel}`);
+              logLines.push(`📚 [${slide.name}] Nested Ref in ${stateLabel} (${contextLabel})`);
+              
+              // Close ONLY the references dialog specifically so the parent dialog remains untouched
+              updateProgress(`📚 Closing nested reference...`);
+              await executeInIframe(`(function() {
+                var refDlg = document.querySelector('#references, #ref');
+                if (refDlg) {
+                  var closeBtn = refDlg.closest('.ui-dialog') ? refDlg.closest('.ui-dialog').querySelector('.ui-dialog-titlebar-close') : null;
+                  if (closeBtn) {
+                    closeBtn.click();
+                  } else {
+                    var btn = refDlg.querySelector('.close, .closeBtn, [class*="close"], .dialog-close');
+                    if (btn) {
+                      btn.click();
+                    } else {
+                      refDlg.style.display = 'none';
+                      var overlay = document.querySelector('.ui-widget-overlay');
+                      if (overlay) overlay.style.display = 'none';
+                    }
+                  }
+                }
+              })()`);
+              await sleep(500);
+            }
+          } catch (_) {}
+        };
+        
+        // Advanced Dialog Internal Crawler: Discover and click tabs / dots inside the dialog!
+        let hasInternalCrawl = false;
+        try {
+          const navInfo = await executeInIframe(`(function() {
+            var openDialog = Array.from(document.querySelectorAll('.dialog, .ui-dialog')).filter(function(d) {
+              return window.getComputedStyle(d).display !== 'none';
+            })[0];
+            if (!openDialog) return null;
+            
+            var tabSelectors = [
+              '.Page_tabBtn', '.tabBtn', '.tab-btn', '.tab-button',
+              '.toptab', '.bottomtab', '.pop3tab', '.tabSwitch',
+              '[data-tab]', '[data-num]',
+              '[class*="tabBtn"]', '[class*="tab-btn"]', '[class*="Page_tab"]',
+              '[class*="bottomtab"]', '[class*="toptab"]', '[class*="pop3tab"]', '[class*="tabSwitch"]'
+            ];
+            
+            var dotSelectors = [
+              '.slider_dot', '.dot', '.slick-dots li', '.owl-dot',
+              '.swiper-pagination-bullet', '.swiper-pagination span', '.swiper-pagination > *',
+              '[class*="slider_dot"]', '[class*="slider-dot"]',
+              '[class*="dotActive"]', '[class*="active_dot"]'
+            ];
+            
+            var tabs = [];
+            tabSelectors.forEach(function(sel) {
+              openDialog.querySelectorAll(sel).forEach(function(el) {
+                if (el.classList.contains('gotoSlide') || el.hasAttribute('data-slide')) return;
+                var style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+                var rect = el.getBoundingClientRect();
+                if (rect.width <= 2 || rect.height <= 2) return;
+                
+                // Exclude parent tab containers/wrappers
+                var className = el.className || "";
+                var lowerClass = className.toLowerCase();
+                if (lowerClass.indexOf('tabs') !== -1 || lowerClass.indexOf('container') !== -1 || lowerClass.indexOf('wrapper') !== -1 || lowerClass.indexOf('switch') !== -1) {
+                  if (el.children.length > 1) return;
+                }
+                
+                tabs.push(el);
+              });
+            });
+            
+            var dots = [];
+            dotSelectors.forEach(function(sel) {
+              openDialog.querySelectorAll(sel).forEach(function(el) {
+                var style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+                var rect = el.getBoundingClientRect();
+                if (rect.width <= 1 || rect.height <= 1) return;
+                
+                // Exclude static text bullets (spans with inner text like •, ·, *, -, o)
+                var text = el.innerText.trim();
+                if (text === '•' || text === '·' || text === 'o' || text === '*' || text === '-' || text === '▪') return;
+                if (text.length > 3) return; // real dots are numbers or empty
+                
+                dots.push(el);
+              });
+            });
+            
+            tabs = Array.from(new Set(tabs));
+            dots = Array.from(new Set(dots));
+            
+            function getUniqueSelector(el) {
+              if (el.id) return '#' + el.id;
+              var path = [];
+              var curr = el;
+              while (curr && curr.nodeType === Node.ELEMENT_NODE) {
+                var selector = curr.nodeName.toLowerCase();
+                if (curr.id) {
+                  selector = '#' + curr.id;
+                  path.unshift(selector);
+                  break;
+                }
+                if (curr.className) {
+                  var classes = Array.from(curr.classList).filter(function(c) {
+                    c = c.trim();
+                    if (c === '') return false;
+                    var lower = c.toLowerCase();
+                    return !(
+                      lower === 'needsclick' ||
+                      lower === 'trackingsubmitted' ||
+                      lower.indexOf('active') !== -1 ||
+                      lower.indexOf('current') !== -1 ||
+                      lower.indexOf('next') !== -1 ||
+                      lower.indexOf('prev') !== -1 ||
+                      lower.indexOf('disabled') !== -1 ||
+                      lower.indexOf('inactive') !== -1 ||
+                      lower.indexOf('focus') !== -1 ||
+                      /^tab\d+$/.test(lower)
+                    );
+                  }).join('.');
+                  if (classes) selector += '.' + classes;
+                }
+                var sibling = curr;
+                var nth = 1;
+                while (sibling = sibling.previousElementSibling) {
+                  if (sibling.nodeName === curr.nodeName) nth++;
+                }
+                selector += ":nth-of-type(" + nth + ")";
+                path.unshift(selector);
+                curr = curr.parentNode;
+              }
+              return path.join(' > ');
+            }
+            
+            var tabsAreInner = false;
+            if (tabs.length > 0 && dots.length > 0) {
+              var firstTab = tabs[0];
+              var slideContainer = firstTab.closest('.swiper-slide, .slick-slide, .owl-item, [class*="swiper-slide"], [class*="slick-slide"]');
+              if (slideContainer) {
+                tabsAreInner = true;
+              }
+            }
+            
+            return {
+              hasTabs: tabs.length > 0,
+              hasDots: dots.length > 0,
+              tabsAreInner: tabsAreInner,
+              tabs: tabs.map(function(el, idx) {
+                return {
+                  selector: getUniqueSelector(el),
+                  id: el.id || "",
+                  dataTab: el.getAttribute('data-tab') || el.getAttribute('data-num') || "",
+                  label: el.getAttribute('data-description') || el.innerText.trim() || "SubTab " + (idx + 1)
+                };
+              }),
+              dots: dots.map(function(el, idx) {
+                return {
+                  selector: getUniqueSelector(el),
+                  label: "Page " + (idx + 1)
+                };
+              })
+            };
+          })()`);
+
+          if (navInfo) {
+            // Case 1: Both exist and Dots are Outer, Tabs are Inner
+            if (navInfo.hasTabs && navInfo.hasDots && navInfo.tabsAreInner) {
+              hasInternalCrawl = true;
+              for (let dIdx = 0; dIdx < navInfo.dots.length; dIdx++) {
+                const dot = navInfo.dots[dIdx];
+                updateProgress(`🔄 Dialog Slider Page ${dIdx + 1}/${navInfo.dots.length} inside ${label}...`);
+                if (dIdx > 0) {
+                  await restoreDialogAndOpenDot(dot.selector, null, true, dIdx);
+                } else {
+                  await clickInIframe(dot.selector);
+                  await sleep(settleMs);
+                }
+
+                // ── Wait for Swiper transition to fully complete before querying active slide ──
+                // After clicking the dot, Swiper's CSS transition (~300ms) may not settle within
+                // settleMs. Poll until swiper-slide-active has moved to the expected index (dIdx).
+                await executeInIframe(`(function() {
+                  return new Promise(function(resolve) {
+                    var targetIdx = ${dIdx};
+                    var deadline = Date.now() + 1500; // max 1.5s wait
+                    function check() {
+                      var openDialog = Array.from(document.querySelectorAll('.dialog, .ui-dialog')).filter(function(d) {
+                        return window.getComputedStyle(d).display !== 'none';
+                      })[0];
+                      if (!openDialog) { resolve(); return; }
+                      var slides = Array.from(openDialog.querySelectorAll('.swiper-slide'));
+                      var activeIdx = slides.findIndex(function(s) { return s.classList.contains('swiper-slide-active'); });
+                      if (activeIdx === targetIdx || Date.now() > deadline) {
+                        resolve();
+                      } else {
+                        setTimeout(check, 50);
+                      }
+                    }
+                    check();
+                  });
+                })()`);
+
+                // Fetch active tabs on this active slide specifically
+                const activeTabs = await executeInIframe(`(function() {
+                  var openDialog = Array.from(document.querySelectorAll('.dialog, .ui-dialog')).filter(function(d) {
+                    return window.getComputedStyle(d).display !== 'none';
+                  })[0];
+                  if (!openDialog) return [];
+                  
+                  // Try swiper-slide-active first; fall back to expected slide index (${dIdx}) if transition hasn't settled
+                  var activeSlide = openDialog.querySelector('.swiper-slide-active, .slick-active, .owl-item.active, [class*="swiper-slide-active"], [class*="slick-active"]');
+                  if (!activeSlide) {
+                    var allSlides = openDialog.querySelectorAll('.swiper-slide, .slick-slide, .owl-item');
+                    if (allSlides[${dIdx}]) activeSlide = allSlides[${dIdx}];
+                  }
+                  // Secondary fallback: if active slide has no tabs, try the slide at our target index
+                  if (activeSlide) {
+                    var hasTabs = activeSlide.querySelectorAll('.pop3tab, [data-num], .tabBtn, .tab-btn, .tab-button').length > 0;
+                    if (!hasTabs) {
+                      var allSlides = openDialog.querySelectorAll('.swiper-slide, .slick-slide, .owl-item');
+                      if (allSlides[${dIdx}]) activeSlide = allSlides[${dIdx}];
+                    }
+                  }
+                  if (!activeSlide) return [];
+                  
+                  var tabSelectors = [
+                    '.Page_tabBtn', '.tabBtn', '.tab-btn', '.tab-button',
+                    '.toptab', '.bottomtab', '.pop3tab', '.tabSwitch',
+                    '[data-tab]', '[data-num]',
+                    '[class*="tabBtn"]', '[class*="tab-btn"]', '[class*="Page_tab"]',
+                    '[class*="bottomtab"]', '[class*="toptab"]', '[class*="pop3tab"]', '[class*="tabSwitch"]'
+                  ];
+                  var tabs = [];
+                  tabSelectors.forEach(function(sel) {
+                    activeSlide.querySelectorAll(sel).forEach(function(el) {
+                      if (el.classList.contains('gotoSlide') || el.hasAttribute('data-slide')) return;
+                      var style = window.getComputedStyle(el);
+                      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+                      var rect = el.getBoundingClientRect();
+                      if (rect.width <= 2 || rect.height <= 2) return;
+                      
+                      // Exclude parent tab containers/wrappers
+                      var className = el.className || "";
+                      var lowerClass = className.toLowerCase();
+                      if (lowerClass.indexOf('tabs') !== -1 || lowerClass.indexOf('container') !== -1 || lowerClass.indexOf('wrapper') !== -1 || lowerClass.indexOf('switch') !== -1) {
+                        if (el.children.length > 1) return;
+                      }
+                      
+                      tabs.push(el);
+                    });
+                  });
+                  
+                  tabs = Array.from(new Set(tabs));
+                  
+                  function getUniqueSelector(el) {
+                    if (el.id) return '#' + el.id;
+                    var path = [];
+                    var curr = el;
+                    while (curr && curr.nodeType === Node.ELEMENT_NODE) {
+                      var selector = curr.nodeName.toLowerCase();
+                      if (curr.id) {
+                        selector = '#' + curr.id;
+                        path.unshift(selector);
+                        break;
+                      }
+                      if (curr.className) {
+                        var classes = Array.from(curr.classList).filter(function(c) {
+                          c = c.trim();
+                          if (c === "") return false;
+                          var lower = c.toLowerCase();
+                          return !(
+                            lower === 'needsclick' ||
+                            lower === 'trackingsubmitted' ||
+                            lower.indexOf('active') !== -1 ||
+                            lower.indexOf('current') !== -1 ||
+                            lower.indexOf('next') !== -1 ||
+                            lower.indexOf('prev') !== -1 ||
+                            lower.indexOf('disabled') !== -1 ||
+                            lower.indexOf('inactive') !== -1 ||
+                            lower.indexOf('focus') !== -1 ||
+                            /^tab\d+$/.test(lower)
+                          );
+                        }).join('.');
+                        if (classes) selector += '.' + classes;
+                      }
+                      var sibling = curr;
+                      var nth = 1;
+                      while (sibling = sibling.previousElementSibling) {
+                        if (sibling.nodeName === curr.nodeName) nth++;
+                      }
+                      selector += ":nth-of-type(" + nth + ")";
+                      path.unshift(selector);
+                      curr = curr.parentNode;
+                    }
+                    return path.join(' > ');
+                  }
+                  
+                  return tabs.map(function(el, idx) {
+                    return {
+                      selector: getUniqueSelector(el),
+                      id: el.id || "",
+                      dataTab: el.getAttribute('data-tab') || el.getAttribute('data-num') || "",
+                      label: el.getAttribute('data-description') || el.innerText.trim() || "SubTab " + (idx + 1)
+                    };
+                  });
+                })()`);
+
+                if (activeTabs && activeTabs.length > 0) {
+                  for (let tIdx = 0; tIdx < activeTabs.length; tIdx++) {
+                    const subTab = activeTabs[tIdx];
+                    updateProgress(`🔄 Dialog SubTab ${tIdx + 1}/${activeTabs.length} on Page ${dIdx + 1}: ${subTab.label}...`);
+                    if (tIdx > 0) {
+                      await restoreDialogAndOpenDot(dot.selector, subTab, true, dIdx);
+                    } else {
+                      await clickDialogTab(subTab);
+                      await sleep(settleMs);
+                    }
+                    await captureAndCompileState(`Popup: ${label} - Page: ${dIdx + 1} - SubTab: ${subTab.label}`);
+                    logLines.push(`💬 [${slide.name}] Dialog: ${label} -> Page ${dIdx + 1} -> SubTab: ${subTab.label}`);
+                    await checkAndCaptureNestedRef(`Popup: ${label} - Page: ${dIdx + 1} - SubTab: ${subTab.label}`);
+                  }
+                } else {
+                  await captureAndCompileState(`Popup: ${label} - Page: ${dIdx + 1}`);
+                  logLines.push(`💬 [${slide.name}] Dialog: ${label} -> Page ${dIdx + 1}`);
+                  await checkAndCaptureNestedRef(`Popup: ${label} - Page: ${dIdx + 1}`);
+                }
+              }
+            }
+            // Case 2: Both exist and Tabs are Outer, Dots are Inner
+            else if (navInfo.hasTabs && navInfo.hasDots && !navInfo.tabsAreInner) {
+              hasInternalCrawl = true;
+              for (let tIdx = 0; tIdx < navInfo.tabs.length; tIdx++) {
+                const subTab = navInfo.tabs[tIdx];
+                updateProgress(`🔄 Dialog SubTab ${tIdx + 1}/${navInfo.tabs.length}: ${subTab.label}...`);
+                if (tIdx > 0) {
+                  await restoreDialogAndOpenDot(null, subTab);
+                } else {
+                  await clickDialogTab(subTab);
+                  await sleep(settleMs);
+                }
+
+                // Fetch active dots on this active tab panel specifically
+                const activeDots = await executeInIframe(`(function() {
+                  var openDialog = Array.from(document.querySelectorAll('.dialog, .ui-dialog')).filter(function(d) {
+                    return window.getComputedStyle(d).display !== 'none';
+                  })[0];
+                  if (!openDialog) return [];
+                  
+                  var activePanel = openDialog.querySelector('.tab-panel.active, .tab-content:not(.hidden), .active-panel, [class*="active-panel"]');
+                  var container = activePanel ? activePanel : openDialog;
+                  
+                  var dotSelectors = [
+                    '.slider_dot', '.dot', '.slick-dots li', '.owl-dot',
+                    '.swiper-pagination-bullet', '.swiper-pagination span', '.swiper-pagination > *',
+                    '[class*="slider_dot"]', '[class*="slider-dot"]',
+                    '[class*="dotActive"]', '[class*="active_dot"]'
+                  ];
+                  var dots = [];
+                  dotSelectors.forEach(function(sel) {
+                    container.querySelectorAll(sel).forEach(function(el) {
+                      var style = window.getComputedStyle(el);
+                      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+                      var rect = el.getBoundingClientRect();
+                      if (rect.width <= 1 || rect.height <= 1) return;
+                      
+                      // Exclude static text bullets
+                      var text = el.innerText.trim();
+                      if (text === '•' || text === '·' || text === 'o' || text === '*' || text === '-' || text === '▪') return;
+                      if (text.length > 3) return;
+                      
+                      dots.push(el);
+                    });
+                  });
+                  
+                  dots = Array.from(new Set(dots));
+                  
+                  function getUniqueSelector(el) {
+                    if (el.id) return '#' + el.id;
+                    var path = [];
+                    var curr = el;
+                    while (curr && curr.nodeType === Node.ELEMENT_NODE) {
+                      var selector = curr.nodeName.toLowerCase();
+                      if (curr.id) {
+                        selector = '#' + curr.id;
+                        path.unshift(selector);
+                        break;
+                      }
+                      if (curr.className) {
+                        var classes = Array.from(curr.classList).filter(function(c) {
+                          c = c.trim();
+                          if (c === "") return false;
+                          var lower = c.toLowerCase();
+                          return !(
+                            lower === 'needsclick' ||
+                            lower === 'trackingsubmitted' ||
+                            lower.indexOf('active') !== -1 ||
+                            lower.indexOf('current') !== -1 ||
+                            lower.indexOf('next') !== -1 ||
+                            lower.indexOf('prev') !== -1 ||
+                            lower.indexOf('disabled') !== -1 ||
+                            lower.indexOf('inactive') !== -1 ||
+                            lower.indexOf('focus') !== -1 ||
+                            /^tab\d+$/.test(lower)
+                          );
+                        }).join('.');
+                        if (classes) selector += '.' + classes;
+                      }
+                      var sibling = curr;
+                      var nth = 1;
+                      while (sibling = sibling.previousElementSibling) {
+                        if (sibling.nodeName === curr.nodeName) nth++;
+                      }
+                      selector += ":nth-of-type(" + nth + ")";
+                      path.unshift(selector);
+                      curr = curr.parentNode;
+                    }
+                    return path.join(' > ');
+                  }
+                  
+                  return dots.map(function(el, idx) {
+                    return {
+                      selector: getUniqueSelector(el),
+                      label: "Page " + (idx + 1)
+                    };
+                  });
+                })()`);
+
+                if (activeDots && activeDots.length > 0) {
+                  for (let dIdx = 0; dIdx < activeDots.length; dIdx++) {
+                    const dot = activeDots[dIdx];
+                    updateProgress(`🔄 Dialog Slider Page ${dIdx + 1}/${activeDots.length} on SubTab ${subTab.label}...`);
+                    if (dIdx > 0) {
+                      await restoreDialogAndOpenDot(dot.selector, subTab, false, dIdx);
+                    } else {
+                      await clickInIframe(dot.selector);
+                      await sleep(settleMs);
+                    }
+                    await captureAndCompileState(`Popup: ${label} - SubTab: ${subTab.label} - Page: ${dIdx + 1}`);
+                    logLines.push(`💬 [${slide.name}] Dialog: ${label} -> SubTab: ${subTab.label} -> Page ${dIdx + 1}`);
+                    await checkAndCaptureNestedRef(`Popup: ${label} - SubTab: ${subTab.label} - Page: ${dIdx + 1}`);
+                  }
+                } else {
+                  await captureAndCompileState(`Popup: ${label} - SubTab: ${subTab.label}`);
+                  logLines.push(`💬 [${slide.name}] Dialog: ${label} -> SubTab: ${subTab.label}`);
+                  await checkAndCaptureNestedRef(`Popup: ${label} - SubTab: ${subTab.label}`);
+                }
+              }
+            }
+            // Case 3: Dots only
+            else if (navInfo.hasDots) {
+              hasInternalCrawl = true;
+              for (let dIdx = 0; dIdx < navInfo.dots.length; dIdx++) {
+                const dot = navInfo.dots[dIdx];
+                updateProgress(`🔄 Dialog Slider Page ${dIdx + 1}/${navInfo.dots.length} inside ${label}...`);
+                if (dIdx > 0) {
+                  await restoreDialogAndOpenDot(dot.selector, null, false, dIdx);
+                } else {
+                  await clickInIframe(dot.selector);
+                  await sleep(settleMs);
+                }
+                await captureAndCompileState(`Popup: ${label} - Page: ${dIdx + 1}`);
+                logLines.push(`💬 [${slide.name}] Dialog: ${label} -> Page ${dIdx + 1}`);
+                await checkAndCaptureNestedRef(`Popup: ${label} - Page: ${dIdx + 1}`);
+              }
+            }
+            // Case 4: Tabs only
+            else if (navInfo.hasTabs) {
+              hasInternalCrawl = true;
+              for (let tIdx = 0; tIdx < navInfo.tabs.length; tIdx++) {
+                const subTab = navInfo.tabs[tIdx];
+                updateProgress(`🔄 Dialog SubTab ${tIdx + 1}/${navInfo.tabs.length} inside ${label}: ${subTab.label}...`);
+                if (tIdx > 0) {
+                  await restoreDialogAndOpenDot(null, subTab);
+                } else {
+                  await clickDialogTab(subTab);
+                  await sleep(settleMs);
+                }
+                await captureAndCompileState(`Popup: ${label} - SubTab: ${subTab.label}`);
+                logLines.push(`💬 [${slide.name}] Dialog: ${label} -> SubTab: ${subTab.label}`);
+                await checkAndCaptureNestedRef(`Popup: ${label} - SubTab: ${subTab.label}`);
+              }
+            }
+          }
+        } catch(err) {
+          console.warn("Advanced nested dialog crawler failed:", err);
+        }
+
+        // Fallback: If no sub-tabs or dots found inside the open dialog, capture standard state
+        if (!hasInternalCrawl) {
+          updateProgress(`📸 Capturing popup: ${label}...`);
+          await captureAndCompileState(`Popup: ${label}`);
+          logLines.push(`💬 [${slide.name}] Dialog: ${label} (${contextLabel})`);
+          await checkAndCaptureNestedRef(`Popup: ${label}`);
+        }
+        
+        await closeIframeDialogs();
+        await sleep(400);
+      }
+    }
+  };
+
+  try {
+    // Ensure clean state to scan tabs
+    await ensureAllClosed();
+    const tabs = await executeInIframe(`(function() {
+      var selectors = [
+        '.Page_tabBtn', '.tabBtn', '.tab-btn', '.tab-button',
+        '[class*="tabBtn"]', '[class*="tab-btn"]', '[class*="Page_tab"]',
+        '.toptab', '.bottomtab', '.pop3tab', '.tabSwitch',
+        '[class*="bottomtab"]', '[class*="toptab"]', '[class*="pop3tab"]', '[class*="tabSwitch"]',
+        '[data-tab]', '[data-num]',
+        '.logClick[class*="tab"]', '.logClick[class*="Tab"]',
+        '[class$="tab"]', '[class$="Tab"]',
+        '[class*="tab_"]', '[class*="Tab_"]'
+      ];
+      
+      var elements = [];
+      selectors.forEach(function(sel) {
+        try {
+          document.querySelectorAll(sel).forEach(function(el) {
+            if (elements.indexOf(el) === -1) elements.push(el);
+          });
+        } catch(_) {}
+      });
+
+      elements = elements.filter(function(el) {
+        var style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        var rect = el.getBoundingClientRect();
+        if (rect.width <= 2 || rect.height <= 2) return false;
+        
+        // Exclude elements that navigate to another slide (slide navigation, not tab switches)
+        if (el.classList.contains('gotoSlide') || el.hasAttribute('data-slide')) return false;
+        
+        // Exclude large parent tab containers (like .bottomtabs or .toptabs wrappers)
+        var className = el.className || "";
+        if (className.indexOf('tabs') !== -1 || className.indexOf('Tabs') !== -1) {
+          if (el.children.length > 1) return false;
+        }
+        
+        return true;
+      });
+      
+      function getUniqueSelector(el) {
+        if (el.id) return '#' + el.id;
+        var path = [];
+        var curr = el;
+        while (curr && curr.nodeType === Node.ELEMENT_NODE) {
+          var selector = curr.nodeName.toLowerCase();
+          if (curr.id) {
+            selector = '#' + curr.id;
+            path.unshift(selector);
+            break;
+          }
+          if (curr.className) {
+            // Strip dynamic/state classes that change after reload (FastClick 'needsclick',
+            // active state 'tabActive', 'tab1'...'tab5', 'active', 'current', 'next', 'prev')
+            var classes = Array.from(curr.classList).filter(function(c) {
+              c = c.trim();
+              if (c === '') return false;
+              var lower = c.toLowerCase();
+              return !(
+                lower === 'needsclick' ||
+                lower === 'trackingsubmitted' ||
+                lower.indexOf('active') !== -1 ||
+                lower.indexOf('current') !== -1 ||
+                lower.indexOf('next') !== -1 ||
+                lower.indexOf('prev') !== -1 ||
+                lower.indexOf('disabled') !== -1 ||
+                lower.indexOf('inactive') !== -1 ||
+                lower.indexOf('focus') !== -1 ||
+                /^tab\d+$/.test(lower)
+              );
+            }).join('.');
+            if (classes) selector += '.' + classes;
+          }
+          var sibling = curr;
+          var nth = 1;
+          while (sibling = sibling.previousElementSibling) {
+            if (sibling.nodeName === curr.nodeName) nth++;
+          }
+          selector += ":nth-of-type(" + nth + ")";
+          path.unshift(selector);
+          curr = curr.parentNode;
+        }
+        return path.join(' > ');
+      }
+
+      return elements.map(function(el) {
+        return {
+          selector: getUniqueSelector(el),
+          id: el.id || "",
+          dataTab: el.getAttribute('data-tab') || "",
+          dataNum: el.getAttribute('data-num') || "",
+          description: el.getAttribute('data-description') || el.innerText || ""
+        };
+      });
+    })()`);
+
+    if (tabs && tabs.length > 0) {
+      for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i];
+        const label = tab.description || tab.id || `Tab ${i + 1}`;
+        
+        updateProgress(`🔄 Tab ${i + 1}/${tabs.length}: ${label}...`);
+        
+        // Set currentTabInfo so activateTabIfNeeded uses data-tab for reliable switching
+        currentTabInfo = tab;
+        
+        // Ensure perfect clean state before switching main slide tabs (reload slide)
+        await loadSlideInIframe();
+        await sleep(settleMs);
+        
+        // Use reliable tab activation (data-tab first, then fallback to selector)
+        await activateTabIfNeeded(tab.selector);
+        
+        updateProgress(`📸 Capturing tab base state: ${label}...`);
+        await captureAndCompileState(`Tab: ${label}`);
+        logLines.push(`🔄 [${slide.name}] Internal Switch: ${label}`);
+        
+        // Open references/abbreviations of this tab first before scanning popups
+        try {
+          const hasRef = await executeInIframe(`(function() {
+            var ref = document.querySelector('#references');
+            if (ref) {
+              var isInactive = ref.classList.contains('inactive') || ref.classList.contains('disabled');
+              var style = window.getComputedStyle(ref);
+              var isHidden = style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0' || parseFloat(style.opacity) < 0.5;
+              if (!isInactive && !isHidden) return 'nav';
+            }
+            var ref2 = document.querySelector('.gotoRef, [data-reftarget]');
+            if (!ref2) return false;
+            if (ref2.closest('.dialog') || ref2.closest('.ui-dialog')) return false;
+            return 'gotoRef';
+          })()`);
+          
+          if (hasRef) {
+            updateProgress(`📚 Opening references for tab: ${label}...`);
+            const refSelector = hasRef === 'nav' ? '#references' : '.gotoRef, [data-reftarget]';
+            await clickInIframe(refSelector);
+            await sleep(settleMs);
+            
+            updateProgress(`📸 Capturing tab references: ${label}...`);
+            await captureAndCompileState(`Nested Ref in Tab: ${label}`);
+            logLines.push(`📚 [${slide.name}] Nested Ref in Tab: ${label}`);
+            
+            updateProgress(`📚 Closing tab references...`);
+            await closeIframeDialogs();
+            await sleep(400);
+            
+            // Restore tab state before scanning dialog popups
+            updateProgress(`🔄 Restoring tab state: ${label}...`);
+            await loadSlideInIframe();
+            await sleep(settleMs);
+            await activateTabIfNeeded(tab.selector);
+          }
+        } catch (refErr) {
+          console.warn(`Failed to capture references for tab ${label}:`, refErr);
+        }
+        
+        // Scan dialog popups specifically while this tab is active
+        await scanAndProcessDialogs(`Tab: ${label}`, tab.selector);
+      }
+    } else {
+      // Standard slide (no tabs) -> just scan dialogs normally
+      await scanAndProcessDialogs('Base Slide', null);
+    }
+  } catch (err) {
+    console.warn(`Internal switch / dialog scanning failed for ${slide.name} (continuing):`, err);
+  }
+  
+  return { logLines };
+}
+
+// ─── Automated Single Slide Crawl (via Live Iframe) ──────────────────────────
+btnAutomateSlide.addEventListener('click', async () => {
+  if (state.slides.length === 0 || state.isCompiling) return;
+  if (state.currentSlideIndex === -1) return;
+  
+  const currentSlide = state.slides[state.currentSlideIndex];
+  const settleMs = state.sleepMs || 800;
+  
+  try {
+    setCompileUIState(true);
+    progressStatusText.innerText = '🔍 Initializing PDF Session...';
+    progressPercentage.innerText = '0%';
+    progressIndicator.style.width = '0%';
+    
+    // Start session
+    await StartPDFSession();
+    
+    const { logLines } = await automateOneSlideViaIframe(
+      currentSlide, state.currentSlideIndex, state.slides.length, settleMs
+    );
+    
+    // Show confirm modal with details before finalizing PDF merge
+    setCompileUIState(false);
+    
+    showConfirmModal(logLines, async () => {
+      try {
+        setCompileUIState(true);
+        progressStatusText.innerText = `📄 Merging and finalizing PDF...`;
+        progressPercentage.innerText = '90%';
+        progressIndicator.style.width = '90%';
+        
+        const savePath = await GenerateNextSequentialPDFPath();
+        const resultPath = await EndPDFSession(savePath);
+        
+        progressStatusText.innerHTML = `🎉 Slide compiled: <span style="color: var(--accent-green); font-family: monospace;">${resultPath}</span>`;
+        progressPercentage.innerText = '100%';
+        progressIndicator.style.width = '100%';
+        progressIndicator.style.background = 'var(--accent-green)';
+        progressIndicator.style.boxShadow = '0 0 10px var(--accent-green)';
+        
+        await refreshPDFList();
+      } catch (err) {
+        console.error('Iframe slide compilation failed:', err);
+        progressStatusText.innerHTML = `❌ Failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
+        progressIndicator.style.background = 'var(--accent-pink)';
+        try { await EndPDFSession(""); } catch(_) {}
+      } finally {
+        setCompileUIState(false);
+      }
+    }, async () => {
+      progressStatusText.innerText = 'Slide automation cancelled.';
+      try { await EndPDFSession(""); } catch(_) {}
+    });
+    
+    // Reload the iframe to restore clean state
+    slideIframe.src = currentSlide.url;
+    if (window.downloadCrawlerLogs) window.downloadCrawlerLogs();
+    
+  } catch (err) {
+    console.error('Iframe automation failed:', err);
+    progressStatusText.innerHTML = `❌ Failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
+    progressIndicator.style.background = 'var(--accent-pink)';
+    setCompileUIState(false);
+    try { await EndPDFSession(""); } catch(_) {}
+    if (window.downloadCrawlerLogs) window.downloadCrawlerLogs();
+  }
+});
+
+// ─── Automated Full Deck Crawl (via Live Iframe) ─────────────────────────────
+// Loops through ALL slides, automating each one via the iframe, then compiles to deck PDF
+btnAutomate.addEventListener('click', async () => {
+  if (state.slides.length === 0 || state.isCompiling) return;
+  
+  const settleMs = state.sleepMs || 800;
+  
+  try {
+    setCompileUIState(true);
+    progressStatusText.innerText = `🚀 Starting deck automation (${state.slides.length} slides)...`;
+    progressPercentage.innerText = '0%';
+    progressIndicator.style.width = '0%';
+    
+    // Start session
+    await StartPDFSession();
+    
+    const allLogLines = [];
+    
+    // Process each slide sequentially via the iframe
+    for (let slideIdx = 0; slideIdx < state.slides.length; slideIdx++) {
+      const slide = state.slides[slideIdx];
+      
+      progressStatusText.innerText = `[${slideIdx + 1}/${state.slides.length}] Processing ${slide.name}...`;
+      const pct = Math.round((slideIdx / state.slides.length) * 90);
+      progressPercentage.innerText = `${pct}%`;
+      progressIndicator.style.width = `${pct}%`;
+      
+      try {
+        const { logLines } = await automateOneSlideViaIframe(
+          slide, slideIdx, state.slides.length, settleMs
+        );
+        allLogLines.push(...logLines);
+      } catch (err) {
+        console.warn(`Failed to automate slide ${slide.name}, skipping:`, err);
+        allLogLines.push(`⚠️ [${slide.name}] Skipped (error: ${err.message || err})`);
+      }
+    }
+    
+    progressStatusText.innerText = `📄 Merging deck pages...`;
+    progressPercentage.innerText = '95%';
+    progressIndicator.style.width = '95%';
+    
+    const savePath = await GenerateDeckAutoSavePath();
+    const resultPath = await EndPDFSession(savePath);
+    
+    progressStatusText.innerHTML = `🎉 Deck compiled: <span style="color: var(--accent-green); font-family: monospace;">${resultPath}</span>`;
+    progressPercentage.innerText = '100%';
+    progressIndicator.style.width = '100%';
+    progressIndicator.style.background = 'var(--accent-green)';
+    progressIndicator.style.boxShadow = '0 0 10px var(--accent-green)';
+    
+    await refreshPDFList();
+    
+    // Restore to first slide
+    if (state.slides.length > 0) {
+      slideIframe.src = state.slides[0].url;
+    }
+    if (window.downloadCrawlerLogs) window.downloadCrawlerLogs();
+    
+  } catch (err) {
+    console.error('Iframe deck automation failed:', err);
+    progressStatusText.innerHTML = `❌ Failed: <span style="color: var(--accent-pink);">${err.message || err}</span>`;
+    progressIndicator.style.background = 'var(--accent-pink)';
+    setCompileUIState(false);
+    try { await EndPDFSession(""); } catch(_) {}
+    if (window.downloadCrawlerLogs) window.downloadCrawlerLogs();
+  }
+});
+
 // ─── IDML Export (Kept as-is) ────────────────────────────────────────────────
 btnIdml.addEventListener('click', async () => {
   if (state.slides.length === 0 || state.isCompiling) return;
@@ -484,6 +2149,8 @@ function setCompileUIState(compiling) {
     btnCompile.setAttribute('disabled', 'true');
     btnScreenshot.setAttribute('disabled', 'true');
     btnIdml.setAttribute('disabled', 'true');
+    btnAutomate.setAttribute('disabled', 'true');
+    btnAutomateSlide.setAttribute('disabled', 'true');
     btnSelectDir.setAttribute('disabled', 'true');
     progressArea.style.display = 'flex';
     progressIndicator.style.background = '';
@@ -492,6 +2159,8 @@ function setCompileUIState(compiling) {
     btnCompile.removeAttribute('disabled');
     btnScreenshot.removeAttribute('disabled');
     btnIdml.removeAttribute('disabled');
+    btnAutomate.removeAttribute('disabled');
+    btnAutomateSlide.removeAttribute('disabled');
     btnSelectDir.removeAttribute('disabled');
   }
 }
@@ -968,7 +2637,12 @@ EventsOn('compilation_progress', (data) => {
   
   const percentage = Math.round((data.current / data.total) * 100);
   
-  if (data.phase === 'rendering') {
+  if (data.phase === 'crawling') {
+    progressStatusText.innerHTML = `Crawling Slide <span>${data.current}/${data.total}</span> (${data.slide}): <span style="color: var(--accent-cyan); font-weight: bold;">${data.detail}</span>`;
+    const curProgress = percentage * 0.9;
+    progressIndicator.style.width = `${curProgress}%`;
+    progressPercentage.innerText = `${Math.round(curProgress)}%`;
+  } else if (data.phase === 'rendering') {
     progressStatusText.innerHTML = `Rendering <span>${data.current}/${data.total}</span>: <span>${data.slide}</span>`;
     progressIndicator.style.width = `${percentage * 0.9}%`;
     progressPercentage.innerText = `${Math.round(percentage * 0.9)}%`;
