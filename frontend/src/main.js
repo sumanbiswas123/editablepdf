@@ -196,7 +196,7 @@ document.querySelector('#app').innerHTML = `
       <div class="brand-title">eDA PDF Compiler</div>
     </div>
     
-    <button class="btn-select-dir" id="btn-select-dir">📁 Select Folder</button>
+    <button class="btn-select-dir" id="btn-select-dir">Open Project</button>
     <div class="dir-path-display" id="dir-path-display">No directory selected</div>
     
     <div class="settings-compact">
@@ -210,7 +210,7 @@ document.querySelector('#app').innerHTML = `
     <!-- Left Panel: Slides -->
     <div class="panel-left">
       <div class="panel-header">
-        Slides Deck
+        Slides
         <span class="count-badge" id="slides-count">0</span>
       </div>
       <div class="slide-list" id="slide-list">
@@ -221,10 +221,10 @@ document.querySelector('#app').innerHTML = `
     <!-- Center Panel: Preview -->
     <div class="panel-center">
       <div class="welcome-overlay" id="welcome-view">
-        <div class="welcome-icon">✨</div>
-        <div class="welcome-title">Interactive eDA PDF Compiler</div>
+        <div class="welcome-icon">◈</div>
+        <div class="welcome-title">eDA PDF Compiler</div>
         <div class="welcome-desc">
-          Select an eDA campaign folder containing slide subfolders (like _001, _002, etc.) and a sibling "shared" assets folder to begin.
+          Open a campaign folder containing slide subfolders and a sibling "shared" assets folder to begin.
         </div>
       </div>
       
@@ -233,37 +233,37 @@ document.querySelector('#app').innerHTML = `
       </div>
       
       <div class="floating-controls" id="floating-toolbar" style="display: none;">
-        <button class="nav-btn" id="btn-prev">👈 Prev</button>
+        <button class="nav-btn" id="btn-prev">← Prev</button>
         <div class="nav-divider"></div>
         <span class="slide-counter" id="slide-counter">1 / 1</span>
         <div class="nav-divider"></div>
-        <button class="nav-btn" id="btn-next">Next 👉</button>
+        <button class="nav-btn" id="btn-next">Next →</button>
       </div>
     </div>
 
     <!-- Right Panel: Compiled PDFs & Combined Decks -->
     <div class="panel-right" style="display: flex; flex-direction: column; height: 100%;">
       <!-- Compiled PDFs (Single Slides) -->
-      <div style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding-bottom: 8px;">
-        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <span>Compiled PDFs</span>
+      <div style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+        <div class="panel-header">
+          <span>Output</span>
           <span class="count-badge" id="pdf-count">0</span>
         </div>
         <div class="pdf-list" id="pdf-list" style="flex: 1; overflow-y: auto;">
-          <div class="pdf-empty">No PDFs compiled yet.<br/>Compile slides to see them here.</div>
+          <div class="pdf-empty">No PDFs compiled yet.</div>
         </div>
       </div>
 
       <!-- Divider line -->
-      <div style="height: 1px; background: var(--border-color); margin: 4px 0; opacity: 0.5;"></div>
+      <div style="height: 1px; background: var(--border-color); margin: 2px 0;"></div>
 
       <!-- Combined Decks -->
-      <div style="display: flex; flex-direction: column; flex: 1; min-height: 0; padding-top: 8px;">
-        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <span>Combined Decks</span>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <button class="compile-btn" id="btn-combine-pdf" style="padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; color: #080c14; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 4px; box-shadow: 0 4px 12px rgba(0, 242, 254, 0.2); transition: all 0.2s; height: 26px; line-height: 26px;" disabled>
-              🔗 Combine
+      <div style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+        <div class="panel-header">
+          <span>Decks</span>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="compile-btn btn-success" id="btn-combine-pdf" style="padding: 2px 8px; font-size: 10px; height: 22px;" disabled>
+              Merge All
             </button>
             <span class="count-badge" id="deck-count">0</span>
           </div>
@@ -278,11 +278,13 @@ document.querySelector('#app').innerHTML = `
   <!-- PDF Viewer Overlay -->
   <div class="pdf-viewer-overlay" id="pdf-viewer" style="display: none;">
     <div class="pdf-viewer-header">
-      <div class="pdf-viewer-title">📄 <span id="pdf-viewer-title-text">Document.pdf</span></div>
-      <div style="display: flex; gap: 12px; align-items: center; justify-content: center; flex: 1; max-width: 400px; margin: 0 auto;">
-        <button class="nav-btn" id="btn-pdf-prev" style="padding: 6px 14px; border-radius: 8px; font-weight: 600; font-size: 12px; margin: 0;">👈 Prev PDF</button>
-        <span id="pdf-viewer-counter" style="color: var(--text-muted); font-size: 0.85rem; font-family: monospace; font-weight: 600; min-width: 60px; text-align: center;">1 / 1</span>
-        <button class="nav-btn" id="btn-pdf-next" style="padding: 6px 14px; border-radius: 8px; font-weight: 600; font-size: 12px; margin: 0;">Next PDF 👉</button>
+      <div class="pdf-viewer-title">
+        <span id="pdf-viewer-title-text">Document.pdf</span>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center; justify-content: center; flex: 1; max-width: 300px; margin: 0 auto;">
+        <button class="nav-btn" id="btn-pdf-prev" style="padding: 4px 10px; font-size: 11px;">← Prev</button>
+        <span id="pdf-viewer-counter" style="color: var(--text-muted); font-size: 10px; font-family: 'Courier New', monospace; font-weight: 600; min-width: 50px; text-align: center;">1 / 1</span>
+        <button class="nav-btn" id="btn-pdf-next" style="padding: 4px 10px; font-size: 11px;">Next →</button>
       </div>
       <button class="btn-close-viewer" id="btn-close-viewer">✕ Close</button>
     </div>
@@ -290,10 +292,10 @@ document.querySelector('#app').innerHTML = `
   </div>
 
   <!-- Metadata Viewer Modal -->
-  <div class="pdf-viewer-overlay" id="metadata-viewer" style="display: none; z-index: 10000; align-items: center; justify-content: center; background: rgba(4, 6, 10, 0.82); backdrop-filter: blur(16px);">
+  <div class="pdf-viewer-overlay" id="metadata-viewer" style="display: none; z-index: 10000; align-items: center; justify-content: center; background: rgba(4, 6, 10, 0.9);">
     <div class="metadata-modal-wrapper">
       <div class="metadata-header">
-        <h3 class="metadata-title-text">📄 PDF Metadata Details</h3>
+        <h3 class="metadata-title-text">PDF Metadata</h3>
         <button class="metadata-close-btn" id="btn-close-metadata">✕</button>
       </div>
       <div class="metadata-scroll-content" id="metadata-content">
@@ -302,11 +304,11 @@ document.querySelector('#app').innerHTML = `
     </div>
   </div>
 
-  <!-- Bottom Compile Bar -->
+  <!-- Bottom Action Bar -->
   <div class="bottom-bar">
     <div class="progress-section" id="progress-area">
       <div class="progress-info">
-        <div id="progress-status-text">Preparing renderer...</div>
+        <div id="progress-status-text">Preparing...</div>
         <div id="progress-percentage">0%</div>
       </div>
       <div class="progress-bar-container">
@@ -315,21 +317,32 @@ document.querySelector('#app').innerHTML = `
     </div>
     
     <div class="compile-buttons">
-      <button class="compile-btn" id="btn-idml" style="background: linear-gradient(135deg, #00f2fe, #4facfe); box-shadow: 0 4px 16px rgba(79, 172, 254, 0.3);" disabled>
-        📁 Export IDML
+      <button class="compile-btn" id="btn-idml" style="display: none;" disabled>
+        Export IDML
       </button>
-      <button class="compile-btn" id="btn-screenshot" style="background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple)); box-shadow: 0 4px 16px rgba(255, 121, 198, 0.3);" disabled>
-        📄 Compile Slide
+      <button class="compile-btn btn-primary" id="btn-screenshot" disabled>
+        Save Slide
       </button>
-      <button class="compile-btn" id="btn-compile" disabled>
-        🚀 Compile Deck
+      <button class="compile-btn" id="btn-compile" style="display: none;" disabled>
+        Compile Deck
       </button>
-      <button class="compile-btn" id="btn-automate-slide" style="background: linear-gradient(135deg, #ff9a9e, #fecfef); box-shadow: 0 4px 16px rgba(255, 154, 158, 0.3); color: #080c14; font-weight: 700;" disabled>
-        🤖 Automate Slide
+      <button class="compile-btn btn-accent" id="btn-automate-slide" disabled>
+        Smart Capture
       </button>
-      <button class="compile-btn" id="btn-automate" style="background: linear-gradient(135deg, #a18cd1, #fbc2eb); box-shadow: 0 4px 16px rgba(161, 140, 209, 0.3);" disabled>
-        🤖 Automate Deck
+      <button class="compile-btn btn-warm" id="btn-automate" disabled>
+        Full Auto
       </button>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar" id="status-bar">
+    <div class="status-item">
+      <div class="status-dot idle" id="status-dot"></div>
+      <span id="status-text">Ready</span>
+    </div>
+    <div class="status-item" style="margin-left: auto;">
+      <span id="status-slide-name">No slide loaded</span>
     </div>
   </div>
 `;
@@ -452,6 +465,10 @@ function loadSlide(idx) {
   
   // Update counter
   slideCounter.innerText = `${idx + 1} / ${state.slides.length}`;
+  
+  // Update status bar
+  const statusSlideName = document.querySelector('#status-slide-name');
+  if (statusSlideName) statusSlideName.innerText = slide.name;
   
   // Toggle vertical styling
   const isVertical = slide.folderName && slide.folderName.toLowerCase().includes('vertical');
@@ -2145,6 +2162,8 @@ btnIdml.addEventListener('click', async () => {
 // ─── Compile UI State Helper ─────────────────────────────────────────────────
 function setCompileUIState(compiling) {
   state.isCompiling = compiling;
+  const statusDot = document.querySelector('#status-dot');
+  const statusText = document.querySelector('#status-text');
   if (compiling) {
     btnCompile.setAttribute('disabled', 'true');
     btnScreenshot.setAttribute('disabled', 'true');
@@ -2155,6 +2174,8 @@ function setCompileUIState(compiling) {
     progressArea.style.display = 'flex';
     progressIndicator.style.background = '';
     progressIndicator.style.boxShadow = '';
+    if (statusDot) { statusDot.className = 'status-dot compiling'; }
+    if (statusText) { statusText.innerText = 'Compiling...'; }
   } else {
     btnCompile.removeAttribute('disabled');
     btnScreenshot.removeAttribute('disabled');
@@ -2162,6 +2183,8 @@ function setCompileUIState(compiling) {
     btnAutomate.removeAttribute('disabled');
     btnAutomateSlide.removeAttribute('disabled');
     btnSelectDir.removeAttribute('disabled');
+    if (statusDot) { statusDot.className = 'status-dot'; }
+    if (statusText) { statusText.innerText = 'Ready'; }
   }
 }
 
@@ -2191,18 +2214,7 @@ async function refreshPDFList() {
   }
 }
 
-// Self-healing fallback: aggressively ensure the Combine button is unlocked ONLY if 2 or more slide PDFs exist (>= 2)
-setInterval(() => {
-  const items = document.querySelectorAll('#pdf-list .pdf-item');
-  const btn = document.querySelector('#btn-combine-pdf');
-  if (btn) {
-    if (items.length > 1 || (state.compiledPDFs && state.compiledPDFs.length > 1)) {
-      btn.removeAttribute('disabled');
-    } else {
-      btn.setAttribute('disabled', 'true');
-    }
-  }
-}, 500);
+// Combine button state is now fully event-driven via refreshPDFList().
 
 function renderCombinedDeckList() {
   if (state.combinedDecks.length === 0) {
