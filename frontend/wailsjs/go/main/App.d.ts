@@ -18,6 +18,8 @@ export function CleanUpTempHTML(arg1:string,arg2:string):Promise<void>;
 
 export function CombineCompiledPDFs():Promise<string>;
 
+export function CombineCustomPDFs(arg1:Array<string>,arg2:string):Promise<string>;
+
 export function CompileDeckFromCaptures(arg1:Array<main.ExportJob>,arg2:number):Promise<string>;
 
 export function CompileScreenshot(arg1:main.ExportJob,arg2:string,arg3:number):Promise<string>;
@@ -40,7 +42,11 @@ export function ExtractPDFMetadata(arg1:string):Promise<string>;
 
 export function GenerateDeckAutoSavePath():Promise<string>;
 
+export function GenerateNextAutoSlidePDFPath(arg1:number):Promise<string>;
+
 export function GenerateNextSequentialPDFPath():Promise<string>;
+
+export function GetAssetBase64(arg1:string):Promise<string>;
 
 export function GetOutputDir():Promise<string>;
 
@@ -50,6 +56,12 @@ export function ListCombinedDecks():Promise<Array<main.CompiledPDF>>;
 
 export function ListCompiledPDFs():Promise<Array<main.CompiledPDF>>;
 
+export function OpenDirectory():Promise<void>;
+
+export function RebuildCombinedPDF(arg1:string,arg2:Array<string>,arg3:Array<string>):Promise<string>;
+
+export function RenameCombinedPDF(arg1:string,arg2:string):Promise<void>;
+
 export function ScanActiveSlide(arg1:string):Promise<Array<string>>;
 
 export function ScanAndStartServer(arg1:string):Promise<main.ScanResult>;
@@ -58,8 +70,12 @@ export function SelectDirectory():Promise<string>;
 
 export function SelectIDMLSavePath(arg1:string):Promise<string>;
 
+export function SelectPDFFile():Promise<string>;
+
 export function SelectSavePath(arg1:string):Promise<string>;
 
 export function SelectScreenshotSavePath(arg1:string):Promise<string>;
+
+export function SplitCombinedPDFToPages(arg1:string):Promise<string>;
 
 export function StartPDFSession():Promise<string>;

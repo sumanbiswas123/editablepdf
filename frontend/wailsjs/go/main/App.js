@@ -34,6 +34,10 @@ export function CombineCompiledPDFs() {
   return window['go']['main']['App']['CombineCompiledPDFs']();
 }
 
+export function CombineCustomPDFs(arg1, arg2) {
+  return window['go']['main']['App']['CombineCustomPDFs'](arg1, arg2);
+}
+
 export function CompileDeckFromCaptures(arg1, arg2) {
   return window['go']['main']['App']['CompileDeckFromCaptures'](arg1, arg2);
 }
@@ -78,8 +82,16 @@ export function GenerateDeckAutoSavePath() {
   return window['go']['main']['App']['GenerateDeckAutoSavePath']();
 }
 
+export function GenerateNextAutoSlidePDFPath(arg1) {
+  return window['go']['main']['App']['GenerateNextAutoSlidePDFPath'](arg1);
+}
+
 export function GenerateNextSequentialPDFPath() {
   return window['go']['main']['App']['GenerateNextSequentialPDFPath']();
+}
+
+export function GetAssetBase64(arg1) {
+  return window['go']['main']['App']['GetAssetBase64'](arg1);
 }
 
 export function GetOutputDir() {
@@ -98,6 +110,18 @@ export function ListCompiledPDFs() {
   return window['go']['main']['App']['ListCompiledPDFs']();
 }
 
+export function OpenDirectory() {
+  return window['go']['main']['App']['OpenDirectory']();
+}
+
+export function RebuildCombinedPDF(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RebuildCombinedPDF'](arg1, arg2, arg3);
+}
+
+export function RenameCombinedPDF(arg1, arg2) {
+  return window['go']['main']['App']['RenameCombinedPDF'](arg1, arg2);
+}
+
 export function ScanActiveSlide(arg1) {
   return window['go']['main']['App']['ScanActiveSlide'](arg1);
 }
@@ -114,12 +138,20 @@ export function SelectIDMLSavePath(arg1) {
   return window['go']['main']['App']['SelectIDMLSavePath'](arg1);
 }
 
+export function SelectPDFFile() {
+  return window['go']['main']['App']['SelectPDFFile']();
+}
+
 export function SelectSavePath(arg1) {
   return window['go']['main']['App']['SelectSavePath'](arg1);
 }
 
 export function SelectScreenshotSavePath(arg1) {
   return window['go']['main']['App']['SelectScreenshotSavePath'](arg1);
+}
+
+export function SplitCombinedPDFToPages(arg1) {
+  return window['go']['main']['App']['SplitCombinedPDFToPages'](arg1);
 }
 
 export function StartPDFSession() {

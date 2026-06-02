@@ -182,6 +182,47 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
 <script>
 (function() {
 
+  // Inject visual presentation overlays
+  try {
+    var injectOverlays = function() {
+      try {
+        var target = document.body || document.documentElement;
+        if (target && !document.getElementById('epdf-overlay-container')) {
+          var container = document.createElement('div');
+          container.id = 'epdf-overlay-container';
+          container.style.cssText = 'position: fixed; inset: 0px; pointer-events: none; z-index: 999998;';
+          container.innerHTML = ' \
+            <div style="position: absolute; top: 6px; left: 7px; display: flex; align-items: center; gap: 8px; pointer-events: auto;"> \
+              <img src="BASE64_WHITE_DOTS" style="height: 14px; width: auto; object-fit: contain;" /> \
+              <img src="BASE64_PENCIL" style="height: 27px; width: auto; object-fit: contain;" /> \
+              <img src="BASE64_ARROWS" style="height: 15px; width: auto; object-fit: contain;" /> \
+            </div> \
+            <div style="position: absolute; top: 51px; left: 12px; pointer-events: auto;"> \
+              <img src="BASE64_COLORS_DOTS" style="width: 12px; height: auto; object-fit: contain;" /> \
+            </div> \
+            <div id="epdf-stack-btn" style="position: absolute; bottom: 8px; left: 8px; pointer-events: auto; cursor: pointer;"> \
+              <img src="BASE64_STACK" style="width: 30px; height: auto; object-fit: contain;" /> \
+            </div> \
+          ';
+          target.appendChild(container);
+
+          var stackBtn = container.querySelector('#epdf-stack-btn');
+          if (stackBtn) {
+            stackBtn.onclick = function() {
+              try {
+                window.parent.postMessage({ type: 'epdf_toggle_bottom_bar' }, '*');
+              } catch (_) {}
+            };
+          }
+        }
+      } catch(_) {}
+    };
+    injectOverlays();
+    window.addEventListener('DOMContentLoaded', injectOverlays);
+    window.addEventListener('load', injectOverlays);
+    setInterval(injectOverlays, 100);
+  } catch(_) {}
+
   // Force quicklinks stylesheet injection
   try {
     var injectStyles = function() {
@@ -459,7 +500,14 @@ if (navigator.userAgent.indexOf('HeadlessChrome') !== -1) {
 						break
 					}
 				}
-				htmlStr = htmlStr[:importIdx] + injection + htmlStr[importIdx:]
+				resolvedInj := injection
+				resolvedInj = strings.Replace(resolvedInj, "BASE64_WHITE_DOTS", a.GetAssetBase64("white-dots.png"), 1)
+				resolvedInj = strings.Replace(resolvedInj, "BASE64_PENCIL", a.GetAssetBase64("pencil.png"), 1)
+				resolvedInj = strings.Replace(resolvedInj, "BASE64_ARROWS", a.GetAssetBase64("arrows.png"), 1)
+				resolvedInj = strings.Replace(resolvedInj, "BASE64_COLORS_DOTS", a.GetAssetBase64("colors-dots.png"), 1)
+				resolvedInj = strings.Replace(resolvedInj, "BASE64_STACK", a.GetAssetBase64("stack.png"), 1)
+
+				htmlStr = htmlStr[:importIdx] + resolvedInj + htmlStr[importIdx:]
 
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1253,5 +1301,28 @@ func (a *App) CleanUpServer() {
 	if a.server != nil {
 		a.server.Shutdown(context.Background())
 	}
+}
+
+// GetAssetBase64 reads an asset image and returns it as a Base64 data URI
+func (a *App) GetAssetBase64(name string) string {
+	path := filepath.Join(a.currentDir, "frontend", "src", "assets", "images", name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// Fallback to absolute path provided by user
+		path = filepath.Join("C:\\Users\\SumanBiswas\\Downloads\\htmltoepdf\\frontend\\src\\assets\\images", name)
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+	}
+	var mime string
+	if strings.HasSuffix(name, ".png") {
+		mime = "image/png"
+	} else if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") {
+		mime = "image/jpeg"
+	} else {
+		mime = "image/png"
+	}
+	return fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
 }
 

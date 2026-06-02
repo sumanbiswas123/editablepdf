@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +22,25 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// OpenDirectory opens the output directory in the native file explorer
+func (a *App) OpenDirectory() error {
+	dir := a.GetOutputDir()
+	if dir == "" {
+		return fmt.Errorf("no output directory available")
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("explorer", dir)
+	case "darwin":
+		cmd = exec.Command("open", dir)
+	default: // Linux and others
+		cmd = exec.Command("xdg-open", dir)
+	}
+	return cmd.Start()
+}
 
 // CompiledPDF represents a generated PDF in the output directory
 type CompiledPDF struct {
@@ -83,6 +104,46 @@ func (a *App) GenerateNextSequentialPDFPath() (string, error) {
 	filename := fmt.Sprintf("%d.pdf", nextNum)
 	return filepath.Join(outDir, filename), nil
 }
+
+// GenerateNextAutoSlidePDFPath returns the next sequential filename for an auto-crawled slide (e.g. slide1_1.pdf, slide1_2.pdf...)
+func (a *App) GenerateNextAutoSlidePDFPath(slideIndex int) (string, error) {
+	outDir, err := a.EnsureOutputDir()
+	if err != nil {
+		return "", err
+	}
+
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		return "", err
+	}
+
+	slideNum := slideIndex + 1
+	prefix := fmt.Sprintf("slide%d_", slideNum)
+
+	maxRun := 0
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".pdf" {
+			continue
+		}
+		name := entry.Name()
+		name = name[:len(name)-4] // remove .pdf
+
+		if strings.HasPrefix(name, prefix) {
+			suffix := name[len(prefix):]
+			var run int
+			if _, err := fmt.Sscanf(suffix, "%d", &run); err == nil {
+				if run > maxRun {
+					maxRun = run
+				}
+			}
+		}
+	}
+
+	nextRun := maxRun + 1
+	filename := fmt.Sprintf("%s%d.pdf", prefix, nextRun)
+	return filepath.Join(outDir, filename), nil
+}
+
 
 // GenerateDeckAutoSavePath generates an auto-save path for the full merged deck PDF
 func (a *App) GenerateDeckAutoSavePath() (string, error) {
@@ -546,8 +607,55 @@ func (a *App) EndPDFSession(outputPath string) (string, error) {
 
 	defer os.RemoveAll(a.pdfTempDir)
 
+	if outputPath == "" {
+		return "", nil
+	}
+
 	if len(a.pdfPaths) == 0 {
 		return "", fmt.Errorf("no slides compiled in this session")
+	}
+
+	// Extract and combine metadata from all individual temp PDFs in this session
+	var combinedMeta []map[string]interface{}
+	currentPage := 1
+	presentationId := filepath.Base(a.currentDir)
+	for _, path := range a.pdfPaths {
+		pageCount, err := api.PageCountFile(path)
+		if err != nil {
+			pageCount = 1
+		}
+		startPage := currentPage
+		endPage := currentPage + pageCount - 1
+		currentPage = currentPage + pageCount
+
+		metaStr, err := a.ExtractPDFMetadata(path)
+		if err == nil && metaStr != "" && metaStr != "{}" {
+			var metaObj map[string]interface{}
+			if err := json.Unmarshal([]byte(metaStr), &metaObj); err == nil {
+				metaObj["startPage"] = startPage
+				metaObj["endPage"] = endPage
+				combinedMeta = append(combinedMeta, metaObj)
+			}
+		} else {
+			base := filepath.Base(path)
+			metaObj := map[string]interface{}{
+				"presentationId": presentationId,
+				"slideName":      base,
+				"folderName":     "",
+				"type":           "slide",
+				"startPage":      startPage,
+				"endPage":        endPage,
+			}
+			combinedMeta = append(combinedMeta, metaObj)
+		}
+	}
+
+	var combinedJSON string
+	if len(combinedMeta) > 0 {
+		metaBytes, err := json.Marshal(combinedMeta)
+		if err == nil {
+			combinedJSON = string(metaBytes)
+		}
 	}
 
 	// Merge all compiled PDFs
@@ -556,15 +664,33 @@ func (a *App) EndPDFSession(outputPath string) (string, error) {
 		return "", fmt.Errorf("failed to merge PDFs: %w", err)
 	}
 
+	if combinedJSON != "" {
+		tempOut := outputPath + ".tmp"
+		err = api.AddPropertiesFile(outputPath, tempOut, map[string]string{
+			"combinedMetadata": combinedJSON,
+			"presentationId":   presentationId,
+		}, nil)
+		if err == nil {
+			os.Remove(outputPath)
+			os.Rename(tempOut, outputPath)
+		} else {
+			os.Remove(tempOut)
+			return "", fmt.Errorf("failed to inject metadata properties into session PDF: %w", err)
+		}
+	}
+
 	return outputPath, nil
 }
 
-// IsSingleSlidePDF checks if a filename represents a single sequential slide PDF (e.g. 1.pdf, 2.pdf)
+// IsSingleSlidePDF checks if a filename represents a single sequential slide PDF (e.g. 1.pdf, 2.pdf, slide1_1.pdf)
 func (a *App) IsSingleSlidePDF(name string) bool {
-	// If it contains the presentation root folder name, it is a combined deck!
+	// If it contains "Full_Deck", it is definitely a combined deck
+	if strings.Contains(name, "Full_Deck") {
+		return false
+	}
 	if a.currentDir != "" {
 		presentationId := filepath.Base(a.currentDir)
-		if presentationId != "" && (strings.Contains(name, presentationId) || strings.Contains(name, "Full_Deck")) {
+		if name == presentationId + ".pdf" {
 			return false
 		}
 	}
@@ -579,12 +705,13 @@ func (a *App) IsSingleSlidePDF(name string) bool {
 		return false
 	}
 	for _, c := range base {
-		if c < '0' || c > '9' {
+		if (c < '0' || c > '9') && c != '_' && c != '-' {
 			return false
 		}
 	}
 	return true
 }
+
 
 // ListCompiledPDFs returns all single slide compiled PDFs in the output directory
 func (a *App) ListCompiledPDFs() ([]CompiledPDF, error) {
@@ -639,10 +766,16 @@ func (a *App) ListCompiledPDFs() ([]CompiledPDF, error) {
 		b1 = strings.Trim(b1, "_- ")
 		b2 = strings.TrimPrefix(b2, "slide")
 		b2 = strings.Trim(b2, "_- ")
-		fmt.Sscanf(b1, "%d", &n1)
-		fmt.Sscanf(b2, "%d", &n2)
-		return n1 < n2
+		_, err1 := fmt.Sscanf(b1, "%d", &n1)
+		_, err2 := fmt.Sscanf(b2, "%d", &n2)
+		if err1 == nil && err2 == nil {
+			if n1 != n2 {
+				return n1 < n2
+			}
+		}
+		return b1 < b2
 	})
+
 
 	return pdfs, nil
 }
@@ -850,6 +983,17 @@ func (a *App) DeleteCompiledPDF(filename string) error {
 	}
 	fullPath := filepath.Join(outDir, filepath.Base(filename))
 	return os.Remove(fullPath)
+}
+
+// RenameCombinedPDF renames a compiled PDF inside the output directory
+func (a *App) RenameCombinedPDF(oldFilename string, newFilename string) error {
+	outDir := a.GetOutputDir()
+	if outDir == "" {
+		return fmt.Errorf("no output directory")
+	}
+	oldPath := filepath.Join(outDir, filepath.Base(oldFilename))
+	newPath := filepath.Join(outDir, filepath.Base(newFilename))
+	return os.Rename(oldPath, newPath)
 }
 
 // ExtractPDFMetadata parses a generated PDF file's Title field to retrieve the JSON metadata
@@ -2634,5 +2778,297 @@ func (a *App) ScanActiveSlide(slideFolder string) ([]string, error) {
 
 	return detected, nil
 }
+
+// CombineCustomPDFs merges a list of PDF filenames/paths in the specified order and injects custom combined metadata JSON
+func (a *App) CombineCustomPDFs(filenames []string, combinedMetadataJSON string) (string, error) {
+	outDir, err := a.EnsureOutputDir()
+	if err != nil {
+		return "", err
+	}
+
+	var fullPaths []string
+	for _, f := range filenames {
+		if filepath.IsAbs(f) {
+			fullPaths = append(fullPaths, f)
+		} else {
+			fullPaths = append(fullPaths, filepath.Join(outDir, filepath.Base(f)))
+		}
+	}
+
+	presentationId := filepath.Base(a.currentDir)
+	finalFilename := presentationId + ".pdf"
+	finalPath := filepath.Join(outDir, finalFilename)
+
+	// If the combined deck already exists, rename it to {presentationId}_oldX.pdf
+	if _, err := os.Stat(finalPath); err == nil {
+		x := 1
+		for {
+			oldFilename := fmt.Sprintf("%s_old%d.pdf", presentationId, x)
+			oldPath := filepath.Join(outDir, oldFilename)
+			if _, err := os.Stat(oldPath); os.IsNotExist(err) {
+				if err := os.Rename(finalPath, oldPath); err != nil {
+					return "", fmt.Errorf("failed to rename existing combined PDF: %w", err)
+				}
+				break
+			}
+			x++
+		}
+	}
+
+	// Merge all single slide PDFs using pdfcpu
+	err = api.MergeCreateFile(fullPaths, finalPath, false, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to merge PDFs: %w", err)
+	}
+
+	// Inject metadata properties
+	if combinedMetadataJSON != "" {
+		tempOut := finalPath + ".tmp"
+		err = api.AddPropertiesFile(finalPath, tempOut, map[string]string{
+			"combinedMetadata": combinedMetadataJSON,
+			"presentationId":   presentationId,
+		}, nil)
+		if err == nil {
+			os.Remove(finalPath)
+			os.Rename(tempOut, finalPath)
+		} else {
+			os.Remove(tempOut)
+			return "", fmt.Errorf("failed to inject metadata properties into combined PDF: %w", err)
+		}
+	}
+
+	return finalPath, nil
+}
+
+// SelectPDFFile opens a system dialog to choose a PDF file and returns its path
+func (a *App) SelectPDFFile() (string, error) {
+	filePath, err := wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{
+		Title: "Select PDF File to Import",
+		Filters: []wailsRuntime.FileFilter{
+			{
+				DisplayName: "PDF Files (*.pdf)",
+				Pattern:     "*.pdf",
+			},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return filePath, nil
+}
+
+// StudioPage represents a single page from a split presentation PDF
+type StudioPage struct {
+	Path     string `json:"path"`
+	Index    int    `json:"index"`
+	Metadata string `json:"metadata"`
+	ServeURL string `json:"serveUrl"`
+}
+
+// SplitCombinedPDFToPages splits a combined presentation PDF into single-page PDF files and returns them as a JSON string
+func (a *App) SplitCombinedPDFToPages(filename string) (string, error) {
+	outDir := a.GetOutputDir()
+	if outDir == "" {
+		return "", fmt.Errorf("no loaded presentation")
+	}
+	fullPath := filepath.Join(outDir, filepath.Base(filename))
+
+	// Create a temp directory inside output for the split pages
+	studioTempDir := filepath.Join(outDir, "studio_temp")
+	os.RemoveAll(studioTempDir)
+	if err := os.MkdirAll(studioTempDir, 0755); err != nil {
+		return "", err
+	}
+
+	// Split the PDF into single pages
+	err := api.SplitFile(fullPath, studioTempDir, 1, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to split PDF: %w", err)
+	}
+
+	// Read entries in studioTempDir
+	entries, err := os.ReadDir(studioTempDir)
+	if err != nil {
+		return "", err
+	}
+
+	// Extract the combined metadata of the original PDF
+	combinedMetaStr, _ := a.ExtractPDFMetadata(fullPath)
+	var metaList []map[string]interface{}
+	if combinedMetaStr != "" {
+		json.Unmarshal([]byte(combinedMetaStr), &metaList)
+	}
+
+	var pages []StudioPage
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".pdf" {
+			continue
+		}
+		name := entry.Name()
+		
+		// pdfcpu split names files as: {filename}_page_{index}.pdf or similar
+		var idx int
+		base := name[:len(name)-4]
+		parts := strings.Split(base, "_page_")
+		if len(parts) > 1 {
+			fmt.Sscanf(parts[1], "%d", &idx)
+		} else {
+			parts = strings.Split(base, "_")
+			if len(parts) > 0 {
+				fmt.Sscanf(parts[len(parts)-1], "%d", &idx)
+			}
+		}
+
+		if idx == 0 {
+			continue
+		}
+
+		pagePath := filepath.Join(studioTempDir, name)
+
+		// Find the metadata record that covers this page index
+		pageMeta := "{}"
+		for _, m := range metaList {
+			startPage, _ := m["startPage"].(float64)
+			endPage, _ := m["endPage"].(float64)
+			if idx >= int(startPage) && idx <= int(endPage) {
+				bytes, err := json.Marshal(m)
+				if err == nil {
+					pageMeta = string(bytes)
+				}
+				break
+			}
+		}
+
+		if pageMeta == "{}" {
+			placeholder := map[string]interface{}{
+				"presentationId": filepath.Base(a.currentDir),
+				"slideName":      fmt.Sprintf("Page %d", idx),
+				"type":           "slide",
+			}
+			bytes, _ := json.Marshal(placeholder)
+			pageMeta = string(bytes)
+		}
+
+		serveURL := fmt.Sprintf("http://localhost:%d/output/studio_temp/%s", a.serverPort, name)
+
+		pages = append(pages, StudioPage{
+			Path:     pagePath,
+			Index:    idx,
+			Metadata: pageMeta,
+			ServeURL: serveURL,
+		})
+	}
+
+	// Sort pages by index
+	sort.Slice(pages, func(i, j int) bool {
+		return pages[i].Index < pages[j].Index
+	})
+
+	// Serialize slice to JSON string
+	pagesJSON, err := json.Marshal(pages)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal studio pages to JSON: %w", err)
+	}
+
+	return string(pagesJSON), nil
+}
+
+// RebuildCombinedPDF merges split PDF pages in the specified order and injects consolidated metadata
+func (a *App) RebuildCombinedPDF(originalFilename string, pagePaths []string, pageMetadatas []string) (string, error) {
+	outDir := a.GetOutputDir()
+	if outDir == "" {
+		return "", fmt.Errorf("no loaded presentation")
+	}
+
+	presentationId := filepath.Base(a.currentDir)
+	finalPath := filepath.Join(outDir, filepath.Base(originalFilename))
+
+	// Consolidate metadata
+	var combinedMeta []map[string]interface{}
+	currentPage := 1
+
+	for idx, path := range pagePaths {
+		metaStr := pageMetadatas[idx]
+
+		pageCount, err := api.PageCountFile(path)
+		if err != nil {
+			pageCount = 1
+		}
+
+		startPage := currentPage
+		endPage := currentPage + pageCount - 1
+		currentPage = currentPage + pageCount
+
+		var metaObj map[string]interface{}
+		if err := json.Unmarshal([]byte(metaStr), &metaObj); err == nil {
+			metaObj["startPage"] = startPage
+			metaObj["endPage"] = endPage
+			combinedMeta = append(combinedMeta, metaObj)
+		} else {
+			metaObj = map[string]interface{}{
+				"presentationId": presentationId,
+				"slideName":      filepath.Base(path),
+				"type":           "slide",
+				"startPage":      startPage,
+				"endPage":        endPage,
+			}
+			combinedMeta = append(combinedMeta, metaObj)
+		}
+	}
+
+	var combinedJSON string
+	if len(combinedMeta) > 0 {
+		metaBytes, err := json.Marshal(combinedMeta)
+		if err == nil {
+			combinedJSON = string(metaBytes)
+		}
+	}
+
+	// Rename existing file to oldX
+	if _, err := os.Stat(finalPath); err == nil {
+		x := 1
+		for {
+			oldFilename := fmt.Sprintf("%s_old%d.pdf", strings.TrimSuffix(filepath.Base(originalFilename), ".pdf"), x)
+			oldPath := filepath.Join(outDir, oldFilename)
+			if _, err := os.Stat(oldPath); os.IsNotExist(err) {
+				if err := os.Rename(finalPath, oldPath); err != nil {
+					return "", fmt.Errorf("failed to backup original: %w", err)
+				}
+				break
+			}
+			x++
+		}
+	}
+
+	// Merge split files into finalPath
+	err := api.MergeCreateFile(pagePaths, finalPath, false, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to merge pages: %w", err)
+	}
+
+	// Inject combined metadata
+	if combinedJSON != "" {
+		tempOut := finalPath + ".tmp"
+		err = api.AddPropertiesFile(finalPath, tempOut, map[string]string{
+			"combinedMetadata": combinedJSON,
+			"presentationId":   presentationId,
+		}, nil)
+		if err == nil {
+			os.Remove(finalPath)
+			os.Rename(tempOut, finalPath)
+		} else {
+			os.Remove(tempOut)
+			return "", fmt.Errorf("failed to inject metadata: %w", err)
+		}
+	}
+
+	// Clean up studio_temp
+	studioTempDir := filepath.Join(outDir, "studio_temp")
+	os.RemoveAll(studioTempDir)
+
+	return finalPath, nil
+}
+
+
 
 
