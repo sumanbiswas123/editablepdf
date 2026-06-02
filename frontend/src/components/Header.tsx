@@ -1,6 +1,6 @@
-import React from 'react';
 import { FolderOpen, Sun, Moon, RefreshCw, Sliders, Cpu, Sparkles } from 'lucide-react';
-import { SelectDirectory } from '../../wailsjs/go/main/App';
+import { StartWSClient, StopWSClient, SelectDirectory } from '../../wailsjs/go/main/App';
+import React, { useState } from 'react';
 
 interface HeaderProps {
   rootDirectory: string;
@@ -22,6 +22,36 @@ export const Header: React.FC<HeaderProps> = ({
   toggleTheme,
   onOpenStudio
 }) => {
+  const [isMac] = useState<boolean>(() => typeof navigator !== 'undefined' && /Mac|Darwin/i.test(navigator.platform));
+  const [wsRunning, setWsRunning] = useState(false);
+  const [macMode, setMacMode] = useState<string>(() => { try{ return localStorage.getItem('macDefaultMode') || 'builder' }catch(e){ return 'builder' } });
+  const [saveDefault, setSaveDefault] = useState<boolean>(() => { try{ return !!localStorage.getItem('macDefaultMode') }catch(e){ return false } });
+
+  const handleStartWS = async () => {
+    try {
+      // create a room code from server
+      const proto = location.protocol === 'https:' ? 'https' : 'http';
+      const res = await fetch(proto + '://' + location.hostname + ':8081/create-room');
+      const j = await res.json();
+      const room = j.room;
+      const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8081/ws';
+      await StartWSClient(wsUrl, room, macMode);
+      setWsRunning(true);
+      if (saveDefault) localStorage.setItem('macDefaultMode', macMode);
+    } catch (err) {
+      console.error('Failed to start WS client:', err);
+      alert('Failed to start WS client. See console for details.');
+    }
+  };
+
+  const handleStopWS = async () => {
+    try {
+      await StopWSClient();
+      setWsRunning(false);
+    } catch (err) {
+      console.error('Failed to stop WS client:', err);
+    }
+  };
   const handleOpenProject = async () => {
     try {
       const dir = await SelectDirectory();
@@ -195,6 +225,22 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Studio Mode Button */}
+      {isMac && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <select value={macMode} onChange={(e) => setMacMode(e.target.value)} style={{ height: '32px', borderRadius: '8px' }}>
+            <option value="builder">Builder</option>
+            <option value="capture">Capture</option>
+          </select>
+          <label style={{ fontSize: '11px' }}>
+            <input type="checkbox" checked={saveDefault} onChange={(e) => { setSaveDefault(e.target.checked); if(!e.target.checked) localStorage.removeItem('macDefaultMode'); }} /> Save
+          </label>
+          {!wsRunning ? (
+            <button onClick={handleStartWS} style={{ height: '32px', padding: '0 10px', borderRadius: '8px' }}>Start WS</button>
+          ) : (
+            <button onClick={handleStopWS} style={{ height: '32px', padding: '0 10px', borderRadius: '8px' }}>Stop WS</button>
+          )}
+        </div>
+      )}
       <button
         onClick={onOpenStudio}
         style={{

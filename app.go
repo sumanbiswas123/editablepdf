@@ -22,6 +22,8 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/gorilla/websocket"
+	"sync"
 )
 
 // Slide represents a discovered slide
@@ -53,6 +55,10 @@ type App struct {
 	pdfAllocatorCancel  context.CancelFunc
 	pdfTempDir          string
 	pdfPaths            []string
+	// WebSocket client for Mac control
+	wsConn     *websocket.Conn
+	wsSendMu   sync.Mutex
+	wsStopCh   chan struct{}
 }
 
 // NewApp creates a new App application struct
@@ -64,6 +70,152 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+// StartWSClient starts a WebSocket client that connects to the given server and room as a Mac role.
+// mode is either "builder" or "capture" and affects behavior.
+func (a *App) StartWSClient(serverURL, room, mode string) error {
+	if a.wsConn != nil {
+		return fmt.Errorf("ws client already running")
+	}
+	if serverURL == "" {
+		serverURL = "ws://127.0.0.1:8081/ws"
+	}
+	u := fmt.Sprintf("%s?room=%s&role=mac", serverURL, room)
+	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
+		return err
+	}
+	a.wsConn = conn
+	a.wsStopCh = make(chan struct{})
+
+	go a.wsReadLoop(mode)
+	return nil
+}
+
+// StopWSClient stops the running WebSocket client, if any.
+func (a *App) StopWSClient() error {
+	if a.wsConn == nil {
+		return nil
+	}
+	close(a.wsStopCh)
+	a.wsSendMu.Lock()
+	_ = a.wsConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	a.wsSendMu.Unlock()
+	_ = a.wsConn.Close()
+	a.wsConn = nil
+	return nil
+}
+
+func (a *App) wsReadLoop(mode string) {
+	for {
+		select {
+		case <-a.wsStopCh:
+			return
+		default:
+		}
+		var msg map[string]interface{}
+		if err := a.wsConn.ReadJSON(&msg); err != nil {
+			// connection closed or error
+			return
+		}
+		t, _ := msg["type"].(string)
+		switch t {
+		case "room_command":
+			cmd, _ := msg["cmd"].(string)
+			target, _ := msg["target"].(string)
+			if cmd == "capture" {
+				go a.handleCaptureCommand(target)
+			} else if cmd == "auto" {
+				// TODO: implement auto-slide orchestration
+			} else if cmd == "save" {
+				// TODO: implement save page
+			}
+		case "render_request":
+			// payload should contain slide info or jobs
+			// expect msg.Data contains jobs JSON or URL
+			// We'll accept a simple form: { type: 'render_request', jobs: [...] }
+			jobsRaw, ok := msg["jobs"]
+			requester, _ := msg["senderId"].(string)
+			if ok && requester != "" {
+				go a.handleRenderRequest(jobsRaw, requester)
+			}
+		}
+	}
+}
+
+func (a *App) sendWS(msg interface{}) error {
+	a.wsSendMu.Lock()
+	defer a.wsSendMu.Unlock()
+	if a.wsConn == nil {
+		return fmt.Errorf("ws not connected")
+	}
+	return a.wsConn.WriteJSON(msg)
+}
+
+// handleCaptureCommand performs a single-capture action for the given room (target)
+func (a *App) handleCaptureCommand(targetRoom string) {
+	// For a simple capture, we can render the current presentation slide(s) to PDF
+	// Here we'll attempt to call existing AutoCompileSlidePDF or CompileSlidesToPDF paths
+	// This is a simplified example: capture current slide as a single page PDF and send back
+	// Build a minimal ExportJob list; in a real integration the jobs would be provided by the requester
+	job := ExportJob{SlideName: "capture", FolderName: "", URL: "http://127.0.0.1:0/"}
+	// Use CompileSlidesToPDF if available - here we will attempt an AutoCompileSlidePDF
+	out, err := a.AutoCompileSlidePDF(job, 200)
+	if err != nil {
+		_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error()})
+		return
+	}
+	// Read PDF bytes and send back to all in room as 'file' or to a specific requester
+	b, err := os.ReadFile(out)
+	if err != nil {
+		_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error()})
+		return
+	}
+	payload := base64.StdEncoding.EncodeToString(b)
+	_ = a.sendWS(map[string]interface{}{"type": "file", "data": payload, "filename": filepath.Base(out), "mimetype": "application/pdf", "target": targetRoom})
+}
+
+func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
+	// jobsRaw expected to be []interface{} map-compatible
+	rawSlice, ok := jobsRaw.([]interface{})
+	if !ok {
+		// try if it's a JSON string
+		if s, ok2 := jobsRaw.(string); ok2 {
+			var parsed []ExportJob
+			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+				jobs := parsed
+				outPath, err := a.CompileSlidesToPDF(jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
+				if err != nil {
+					_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
+					return
+				}
+				b, _ := os.ReadFile(outPath)
+				_ = a.sendWS(map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": filepath.Base(outPath), "mimetype": "application/pdf", "target": requester})
+				return
+			}
+		}
+		_ = a.sendWS(map[string]interface{}{"type": "error", "message": "invalid jobs", "target": requester})
+		return
+	}
+	var jobs []ExportJob
+	for _, item := range rawSlice {
+		if m, ok := item.(map[string]interface{}); ok {
+			job := ExportJob{}
+			if v, ok := m["slideName"].(string); ok { job.SlideName = v }
+			if v, ok := m["folderName"].(string); ok { job.FolderName = v }
+			if v, ok := m["url"].(string); ok { job.URL = v }
+			if v, ok := m["customHtml"].(string); ok { job.CustomHTML = v }
+			jobs = append(jobs, job)
+		}
+	}
+	outPath, err := a.CompileSlidesToPDF(jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
+	if err != nil {
+		_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
+		return
+	}
+	b, _ := os.ReadFile(outPath)
+	_ = a.sendWS(map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": filepath.Base(outPath), "mimetype": "application/pdf", "target": requester})
 }
 
 // SelectDirectory triggers the folder selector dialog

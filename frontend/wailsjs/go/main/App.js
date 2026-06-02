@@ -157,3 +157,11 @@ export function SplitCombinedPDFToPages(arg1) {
 export function StartPDFSession() {
   return window['go']['main']['App']['StartPDFSession']();
 }
+
+export function StartWSClient(arg1, arg2, arg3) {
+  return window['go']['main']['App']['StartWSClient'](arg1, arg2, arg3);
+}
+
+export function StopWSClient() {
+  return window['go']['main']['App']['StopWSClient']();
+}

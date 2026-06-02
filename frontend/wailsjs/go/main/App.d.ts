@@ -79,3 +79,7 @@ export function SelectScreenshotSavePath(arg1:string):Promise<string>;
 export function SplitCombinedPDFToPages(arg1:string):Promise<string>;
 
 export function StartPDFSession():Promise<string>;
+
+export function StartWSClient(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function StopWSClient():Promise<void>;

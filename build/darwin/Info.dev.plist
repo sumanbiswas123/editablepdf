@@ -61,8 +61,31 @@
         {{end}}
         <key>NSAppTransportSecurity</key>
         <dict>
-            <key>NSAllowsLocalNetworking</key>
-            <true/>
+          <key>NSAllowsLocalNetworking</key>
+          <true/>
+          <key>NSAllowsArbitraryLoadsInWebContent</key>
+          <true/>
+          <key>NSExceptionDomains</key>
+          <dict>
+            <key>localhost</key>
+            <dict>
+              <key>NSExceptionAllowsInsecureHTTPLoads</key>
+              <true/>
+              <key>NSIncludesSubdomains</key>
+              <true/>
+              <key>NSExceptionRequiresForwardSecrecy</key>
+              <false/>
+            </dict>
+            <key>wails.localhost</key>
+            <dict>
+              <key>NSExceptionAllowsInsecureHTTPLoads</key>
+              <true/>
+              <key>NSIncludesSubdomains</key>
+              <true/>
+              <key>NSExceptionRequiresForwardSecrecy</key>
+              <false/>
+            </dict>
+          </dict>
         </dict>
     </dict>
 </plist>

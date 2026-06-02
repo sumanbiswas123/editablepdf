@@ -1,0 +1,234 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WS Screenshot Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px }
+    #images img { max-width: 100%; border: 1px solid #ccc; margin: 8px 0 }
+  </style>
+</head>
+<body>
+  <h3>WebSocket Screenshot Room</h3>
+  <div>
+    <button id="createRoom">Create Room</button>
+    Room ID: <input id="roomId" style="width:420px" />
+  </div>
+  <div style="margin-top:8px">
+    Role:
+    <select id="role">
+      <option value="mac">mac</option>
+      <option value="windows">windows (render-only)</option>
+      <option value="guest">guest</option>
+    </select>
+    <span id="macModeWrap" style="margin-left:12px; display:none">
+      Mode:
+      <select id="macMode">
+        <option value="builder">builder</option>
+        <option value="capture">capture</option>
+      </select>
+      <label style="margin-left:8px"><input type="checkbox" id="saveDefault"/> Save as default</label>
+    </span>
+    <button id="connect">Connect</button>
+    <button id="disconnect" disabled>Disconnect</button>
+  </div>
+
+  <div id="macControls" style="margin-top:12px; display:none">
+    <div>
+      <label>Send image (screenshot):</label>
+      <input id="imgFile" type="file" accept="image/*" />
+      <button id="sendImg">Send Image</button>
+    </div>
+    <div style="margin-top:8px">
+      <label>Send file / zip:</label>
+      <input id="anyFile" type="file" />
+      <button id="sendFile">Send File</button>
+    </div>
+  </div>
+
+  <div id="addDeviceWrap" style="margin-top:12px; display:none">
+    <button id="addDevice">Add device (generate 6-digit code)</button>
+    <span id="deviceCode" style="margin-left:12px; font-weight:bold"></span>
+    <button id="copyCode" style="display:none; margin-left:8px">Copy</button>
+  </div>
+
+  <h4>Received</h4>
+  <div id="images"></div>
+  <h4 id="devicesHeader" style="display:none">Devices (owned by this Mac)</h4>
+  <div id="devicesGrid" style="display:none; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:8px"></div>
+
+  <script>
+    let ws, roleEl = document.getElementById('role');
+    document.getElementById('createRoom').addEventListener('click', async ()=>{
+      const proto = location.protocol === 'https:' ? 'https' : 'http';
+      const url = proto + '://' + location.hostname + ':8081/create-room';
+      const res = await fetch(url);
+      const j = await res.json();
+      document.getElementById('roomId').value = j.room;
+    });
+
+    // Mac-specific UI: mode selector and Add Device (pairing code)
+    (function(){
+      const roleEl = document.getElementById('role');
+      const macModeWrap = document.getElementById('macModeWrap');
+      const addDeviceWrap = document.getElementById('addDeviceWrap');
+      const macModeEl = document.getElementById('macMode');
+      const saveDefaultEl = document.getElementById('saveDefault');
+
+      function updateRoleUI(){
+        if(roleEl.value === 'mac'){
+          macModeWrap.style.display = 'inline-block';
+          addDeviceWrap.style.display = 'block';
+          try{ const saved = localStorage.getItem('macDefaultMode'); if(saved){ macModeEl.value = saved; saveDefaultEl.checked = true } }catch(e){}
+        } else {
+          macModeWrap.style.display = 'none';
+          addDeviceWrap.style.display = 'none';
+        }
+      }
+      roleEl.addEventListener('change', updateRoleUI);
+      updateRoleUI();
+
+      saveDefaultEl.addEventListener('change', ()=>{
+        try{ if(saveDefaultEl.checked) localStorage.setItem('macDefaultMode', macModeEl.value); else localStorage.removeItem('macDefaultMode') }catch(e){}
+      });
+      macModeEl.addEventListener('change', ()=>{ if(saveDefaultEl.checked) try{ localStorage.setItem('macDefaultMode', macModeEl.value) }catch(e){} });
+
+      document.getElementById('addDevice').addEventListener('click', async ()=>{
+        const proto = location.protocol === 'https:' ? 'https' : 'http';
+        const url = proto + '://' + location.hostname + ':8081/create-room';
+        const res = await fetch(url);
+        const j = await res.json();
+        const span = document.getElementById('deviceCode');
+        span.textContent = j.room;
+        const copyBtn = document.getElementById('copyCode');
+        copyBtn.style.display = 'inline-block';
+        copyBtn.onclick = ()=>{ navigator.clipboard.writeText(j.room) };
+      });
+    })();
+
+    document.getElementById('connect').addEventListener('click', ()=>{
+      const room = document.getElementById('roomId').value.trim();
+      const role = roleEl.value;
+      if(!room) return alert('enter room id');
+      const wsProto = location.protocol==='https:' ? 'wss://' : 'ws://';
+      const wsUrl = wsProto + location.hostname + ':8081/ws?room=' + encodeURIComponent(room) + '&role=' + encodeURIComponent(role);
+      ws = new WebSocket(wsUrl);
+      ws.onopen = ()=>{
+        document.getElementById('connect').disabled = true;
+        document.getElementById('disconnect').disabled = false;
+        if(role==='mac') document.getElementById('macControls').style.display='block';
+      };
+        ws.onmessage = (ev)=>{
+          try{
+            const msg = JSON.parse(ev.data);
+            if(msg.type === 'device_created'){
+              const span = document.getElementById('deviceCode');
+              span.textContent = msg.data;
+              const copyBtn = document.getElementById('copyCode');
+              copyBtn.style.display = 'inline-block';
+              copyBtn.onclick = ()=>{ navigator.clipboard.writeText(msg.data) };
+              return;
+            }
+            if(msg.type === 'devices_list'){
+              try{
+                const list = JSON.parse(msg.data);
+                console.log('devices_list', list);
+              }catch(e){}
+              return;
+            }
+            if(msg.type === 'screenshot' && msg.data){
+              const img = new Image();
+              img.src = 'data:' + (msg.mimetype || 'image/png') + ';base64,' + msg.data;
+              document.getElementById('images').prepend(img);
+            } else if(msg.type === 'file' && msg.data){
+              const bin = atob(msg.data);
+              const len = bin.length;
+              const bytes = new Uint8Array(len);
+              for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+              const blob = new Blob([bytes], { type: msg.mimetype || 'application/octet-stream' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = msg.filename || 'file';
+              a.textContent = 'Download: ' + (msg.filename || 'file');
+              a.style.display = 'block';
+              document.getElementById('images').prepend(a);
+            }
+          }catch(e){ console.error(e) }
+        };
+      ws.onclose = ()=>{
+        document.getElementById('connect').disabled = false;
+        document.getElementById('disconnect').disabled = true;
+        document.getElementById('macControls').style.display='none';
+      };
+    });
+
+    document.getElementById('disconnect').addEventListener('click', ()=>{
+      if(ws) ws.close();
+    });
+
+    document.getElementById('sendImg').addEventListener('click', ()=>{
+      const f = document.getElementById('imgFile').files[0];
+      if(!f) return alert('choose an image file');
+      const r = new FileReader();
+      r.onload = ()=>{
+        const parts = r.result.split(',');
+        const b64 = parts[1];
+        const mime = parts[0].match(/data:(.*);base64/)?.[1] || f.type || 'image/png';
+        const msg = { type: 'screenshot', data: b64, filename: f.name, mimetype: mime };
+        ws.send(JSON.stringify(msg));
+      };
+      r.readAsDataURL(f);
+    });
+
+    document.getElementById('sendFile').addEventListener('click', ()=>{
+      const f = document.getElementById('anyFile').files[0];
+      if(!f) return alert('choose a file');
+      const r = new FileReader();
+      r.onload = ()=>{
+        const parts = r.result.split(',');
+        const b64 = parts[1];
+        const mime = parts[0].match(/data:(.*);base64/)?.[1] || f.type || 'application/octet-stream';
+        const msg = { type: 'file', data: b64, filename: f.name, mimetype: mime };
+        ws.send(JSON.stringify(msg));
+      };
+      r.readAsDataURL(f);
+    });
+
+    // Mac: request and render devices grid
+    function requestDevices(){
+      if(!ws) return;
+      try{ ws.send(JSON.stringify({ type: 'list_devices' })) }catch(e){}
+    }
+
+    function renderDevices(list){
+      const header = document.getElementById('devicesHeader');
+      const grid = document.getElementById('devicesGrid');
+      if(!list || list.length===0){ header.style.display='none'; grid.style.display='none'; grid.innerHTML=''; return }
+      header.style.display='block'; grid.style.display='grid';
+      grid.style.gridTemplateColumns = 'repeat(auto-fill,minmax(200px,1fr))';
+      grid.style.gap = '8px';
+      grid.innerHTML = '';
+      list.forEach(d=>{
+        const card = document.createElement('div');
+        card.style.border = '1px solid #ccc'; card.style.padding='8px'; card.style.background='#fafafa';
+        const title = document.createElement('div'); title.textContent = 'Room: ' + d.room; title.style.fontWeight='bold';
+        const cnt = document.createElement('div'); cnt.textContent = 'Connected: ' + d.count;
+        const btnCapture = document.createElement('button'); btnCapture.textContent='Capture'; btnCapture.style.margin='4px';
+        btnCapture.onclick = ()=>{ ws.send(JSON.stringify({ type:'room_command', target: d.room, cmd:'capture' })) };
+        const btnAuto = document.createElement('button'); btnAuto.textContent='Auto-slide'; btnAuto.style.margin='4px';
+        btnAuto.onclick = ()=>{ ws.send(JSON.stringify({ type:'room_command', target: d.room, cmd:'auto' })) };
+        const btnSave = document.createElement('button'); btnSave.textContent='Save page'; btnSave.style.margin='4px';
+        btnSave.onclick = ()=>{ ws.send(JSON.stringify({ type:'room_command', target: d.room, cmd:'save' })) };
+        card.appendChild(title); card.appendChild(cnt); card.appendChild(btnCapture); card.appendChild(btnAuto); card.appendChild(btnSave);
+        grid.appendChild(card);
+      })
+    }
+
+    // poll for devices when mac connected
+    setInterval(()=>{
+      if(roleEl.value === 'mac' && ws && ws.readyState===1){ requestDevices() }
+    }, 5000);
+  </script>
+</body>
+</html>
