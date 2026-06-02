@@ -1305,24 +1305,42 @@ func (a *App) CleanUpServer() {
 
 // GetAssetBase64 reads an asset image and returns it as a Base64 data URI
 func (a *App) GetAssetBase64(name string) string {
-	path := filepath.Join(a.currentDir, "frontend", "src", "assets", "images", name)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		// Fallback to absolute path provided by user
-		path = filepath.Join("C:\\Users\\SumanBiswas\\Downloads\\htmltoepdf\\frontend\\src\\assets\\images", name)
-		data, err = os.ReadFile(path)
-		if err != nil {
-			return ""
+	// Try multiple candidate locations to be robust across environments
+	candidates := []string{}
+	if a.currentDir != "" {
+		candidates = append(candidates, filepath.Join(a.currentDir, "frontend", "src", "assets", "images", name))
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates, filepath.Join(exeDir, "frontend", "src", "assets", "images", name))
+		// macOS app bundle Resources
+		candidates = append(candidates, filepath.Join(exeDir, "..", "Resources", "frontend", "src", "assets", "images", name))
+	}
+
+	// Project-relative and common paths
+	candidates = append(candidates,
+		filepath.Join("frontend", "src", "assets", "images", name),
+		filepath.Join("assets", "images", name),
+	)
+
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err == nil {
+			var mime string
+			if strings.HasSuffix(strings.ToLower(name), ".png") {
+				mime = "image/png"
+			} else if strings.HasSuffix(strings.ToLower(name), ".jpg") || strings.HasSuffix(strings.ToLower(name), ".jpeg") {
+				mime = "image/jpeg"
+			} else if strings.HasSuffix(strings.ToLower(name), ".svg") {
+				mime = "image/svg+xml"
+			} else {
+				mime = "application/octet-stream"
+			}
+			return fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
 		}
 	}
-	var mime string
-	if strings.HasSuffix(name, ".png") {
-		mime = "image/png"
-	} else if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") {
-		mime = "image/jpeg"
-	} else {
-		mime = "image/png"
-	}
-	return fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
+
+	return ""
 }
 
