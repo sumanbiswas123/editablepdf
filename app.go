@@ -193,6 +193,9 @@ func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
 				outPath, err := a.CompileSlidesToPDF(jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
 				if err != nil {
 					wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Render error: %s", err.Error()))
+					if strings.Contains(err.Error(), "net::ERR_CONNECTION_TIMED_OUT") || strings.Contains(err.Error(), "net::ERR_ADDRESS_UNREACHABLE") {
+						wailsRuntime.EventsEmit(a.ctx, "viewership_event", "💡 Troubleshooting tip: Ensure both devices are on the exact same Wi-Fi network, client isolation is disabled on the router, and Windows Firewall permits incoming connections on the dynamic port.")
+					}
 					_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
 					return
 				}
@@ -221,6 +224,9 @@ func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
 	outPath, err := a.CompileSlidesToPDF(jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
 	if err != nil {
 		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Render error: %s", err.Error()))
+		if strings.Contains(err.Error(), "net::ERR_CONNECTION_TIMED_OUT") || strings.Contains(err.Error(), "net::ERR_ADDRESS_UNREACHABLE") {
+			wailsRuntime.EventsEmit(a.ctx, "viewership_event", "💡 Troubleshooting tip: Ensure both devices are on the exact same Wi-Fi network, client isolation is disabled on the router, and Windows Firewall permits incoming connections on the dynamic port.")
+		}
 		_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
 		return
 	}
@@ -864,6 +870,7 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 		})
 
 		renderUrl := job.URL
+		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Navigating to URL: %s", renderUrl))
 
 		// If custom interactive state HTML is provided, write it temporarily
 		var tempFile string
