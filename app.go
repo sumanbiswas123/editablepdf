@@ -428,7 +428,8 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
 
 window.addEventListener('message', function(e) {
   // ─── Handle: request_html (DOM capture for PDF compilation) ───
-  if (e.data === 'request_html') {
+  var isRequestHtml = e.data === 'request_html' || (e.data && e.data.type === 'request_html');
+  if (isRequestHtml) {
     // 1. Locate the topmost active popup in standard DOM (excluding backdrop overlays)
     var topActivePopup = null;
     var maxZ = -1;

@@ -469,7 +469,7 @@ export const App: React.FC = () => {
 
       try {
         if (iframeRef.current && iframeRef.current.contentWindow) {
-          iframeRef.current.contentWindow.postMessage('request_html', '*');
+          iframeRef.current.contentWindow.postMessage({ type: 'request_html' }, '*');
         } else {
           clearTimeout(timeout);
           window.removeEventListener('message', handler);
