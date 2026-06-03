@@ -900,7 +900,10 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 		}
 
 		// Set document title with JSON metadata of slide/popup details so Chrome embeds it into PDF metadata
-		presentationId := filepath.Base(a.currentDir)
+		presentationId := "presentation_deck"
+		if a.currentDir != "" {
+			presentationId = filepath.Base(a.currentDir)
+		}
 		timestampStr := time.Now().Format(time.RFC3339)
 		actions = append(actions,
 			chromedp.ActionFunc(func(ctx context.Context) error {

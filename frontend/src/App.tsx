@@ -758,11 +758,28 @@ export const App: React.FC = () => {
       const html = await captureCurrentSlideState();
       if (!html) return;
 
+      let renderUrl = slide.url;
+      if (html && appMode === 'capture') {
+        try {
+          const tempUrl = await CaptureCustomStateHTML(slide.folderName, html);
+          const localIP = windowsIP || '127.0.0.1';
+          renderUrl = tempUrl.replace('127.0.0.1', localIP).replace('localhost', localIP);
+          
+          const filename = tempUrl.substring(tempUrl.lastIndexOf('/') + 1);
+          pendingCleanupsRef.current.push({
+            folder: slide.folderName,
+            file: filename
+          });
+        } catch (writeErr) {
+          console.warn("Failed to write state HTML locally on Windows, falling back to direct URL:", writeErr);
+        }
+      }
+
       const job = {
         slideName: slide.name,
         folderName: slide.folderName,
-        url: slide.url,
-        customHtml: html,
+        url: renderUrl,
+        customHtml: '', // empty so Mac Performer handles it as direct URL
         tempFilename: ''
       };
 
@@ -1916,15 +1933,32 @@ export const App: React.FC = () => {
           detail: 'Preparing slide state resources for Mac Performer...'
         });
 
+        let renderUrl = activeSlide.url;
+        pendingCleanupsRef.current = [];
+
+        if (capturedHtml) {
+          try {
+            const tempUrl = await CaptureCustomStateHTML(activeSlide.folderName, capturedHtml);
+            const localIP = windowsIP || '127.0.0.1';
+            renderUrl = tempUrl.replace('127.0.0.1', localIP).replace('localhost', localIP);
+            
+            const filename = tempUrl.substring(tempUrl.lastIndexOf('/') + 1);
+            pendingCleanupsRef.current.push({
+              folder: activeSlide.folderName,
+              file: filename
+            });
+          } catch (writeErr) {
+            console.warn("Failed to write state HTML locally on Windows, falling back to direct URL:", writeErr);
+          }
+        }
+
         const job = {
           slideName: activeSlide.name,
           folderName: activeSlide.folderName,
-          url: activeSlide.url,
-          customHtml: capturedHtml,
+          url: renderUrl,
+          customHtml: '', // empty so Mac Performer handles it as direct URL
           tempFilename: ''
         };
-
-        pendingCleanupsRef.current = [];
 
         remoteFilenameRef.current = `${activeSlide.name}.pdf`;
         controllerWS?.send(JSON.stringify({
@@ -2014,6 +2048,7 @@ export const App: React.FC = () => {
       });
 
       remoteJobsRef.current = [];
+      pendingCleanupsRef.current = [];
       if (appMode !== 'capture') {
         await StartPDFSession();
       }
@@ -2060,8 +2095,6 @@ export const App: React.FC = () => {
                   tempFilename: ''
                 });
               }
-
-              pendingCleanupsRef.current = [];
 
               setCompilationProgress({
                 phase: 'rendering',
@@ -2146,6 +2179,7 @@ export const App: React.FC = () => {
     try {
       setIsCompiling(true);
       remoteJobsRef.current = [];
+      pendingCleanupsRef.current = [];
       
       setCompilationProgress({
         phase: 'crawling',
@@ -2209,8 +2243,6 @@ export const App: React.FC = () => {
             tempFilename: ''
           });
         }
-
-        pendingCleanupsRef.current = [];
 
         setCompilationProgress({
           phase: 'merging',
