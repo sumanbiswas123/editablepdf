@@ -35,7 +35,8 @@ import {
   StopWSClient,
   CaptureCustomStateHTML,
   CleanUpTempHTML,
-  SyncWorkspaceToMac
+  SyncWorkspaceToMac,
+  ReadLocalFile
 } from '../wailsjs/go/main/App';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
@@ -1924,6 +1925,26 @@ export const App: React.FC = () => {
             const list = JSON.parse(msg.data);
             setConnectedClients(list || []);
           } catch (_) {}
+        } else if (msg.type === 'proxy_request') {
+          try {
+            const res = await ReadLocalFile(msg.filename);
+            ws.send(JSON.stringify({
+              type: 'proxy_response',
+              target: msg.senderId,
+              cmd: msg.cmd,
+              data: res.data,
+              mimetype: res.mime,
+              statusCode: 200
+            }));
+          } catch (readErr) {
+            console.error("Failed to read proxy file:", readErr);
+            ws.send(JSON.stringify({
+              type: 'proxy_response',
+              target: msg.senderId,
+              cmd: msg.cmd,
+              statusCode: 404
+            }));
+          }
         }
       } catch (err: any) {
         console.error("Error processing WS message:", err);

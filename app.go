@@ -145,13 +145,7 @@ func (a *App) wsReadLoop(mode string) {
 		case "sync_workspace":
 			dataStr, _ := msg["data"].(string)
 			go a.handleSyncWorkspace(dataStr)
-		case "proxy_request":
-			path, _ := msg["filename"].(string)
-			reqID, _ := msg["cmd"].(string)
-			requester, _ := msg["senderId"].(string)
-			if path != "" && reqID != "" && requester != "" {
-				go a.handleProxyRequest(path, reqID, requester)
-			}
+
 		case "proxy_response":
 			reqID, _ := msg["cmd"].(string)
 			dataStr, _ := msg["data"].(string)
@@ -1734,39 +1728,21 @@ func (a *App) handleSyncWorkspace(zipBase64 string) {
 	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Performer HTTP server active locally on port %d", port))
 }
 
-// handleProxyRequest reads local files and sends them to Mac Performer over WebSocket.
-func (a *App) handleProxyRequest(path string, reqID string, requester string) {
+// ReadLocalFile reads a file from the local workspace directory and returns its base64 data and mime type.
+func (a *App) ReadLocalFile(path string) (map[string]string, error) {
 	if a.currentDir == "" {
-		_ = a.sendWS(map[string]interface{}{
-			"type":       "proxy_response",
-			"target":     requester,
-			"cmd":        reqID,
-			"statusCode": http.StatusServiceUnavailable,
-		})
-		return
+		return nil, fmt.Errorf("no workspace directory loaded")
 	}
 
 	fullPath := filepath.Join(a.currentDir, path)
 	cleanedPath := filepath.Clean(fullPath)
 	if !strings.HasPrefix(cleanedPath, filepath.Clean(a.currentDir)) {
-		_ = a.sendWS(map[string]interface{}{
-			"type":       "proxy_response",
-			"target":     requester,
-			"cmd":        reqID,
-			"statusCode": http.StatusForbidden,
-		})
-		return
+		return nil, fmt.Errorf("forbidden path traversal detected")
 	}
 
 	data, err := os.ReadFile(cleanedPath)
 	if err != nil {
-		_ = a.sendWS(map[string]interface{}{
-			"type":       "proxy_response",
-			"target":     requester,
-			"cmd":        reqID,
-			"statusCode": http.StatusNotFound,
-		})
-		return
+		return nil, err
 	}
 
 	var mime string
@@ -1798,13 +1774,9 @@ func (a *App) handleProxyRequest(path string, reqID string, requester string) {
 		mime = "application/octet-stream"
 	}
 
-	_ = a.sendWS(map[string]interface{}{
-		"type":       "proxy_response",
-		"target":     requester,
-		"cmd":        reqID,
-		"data":       base64.StdEncoding.EncodeToString(data),
-		"mimetype":   mime,
-		"statusCode": http.StatusOK,
-	})
+	return map[string]string{
+		"data": base64.StdEncoding.EncodeToString(data),
+		"mime": mime,
+	}, nil
 }
 

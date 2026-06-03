@@ -122,6 +122,10 @@ export function OpenDirectory() {
   return window['go']['main']['App']['OpenDirectory']();
 }
 
+export function ReadLocalFile(arg1) {
+  return window['go']['main']['App']['ReadLocalFile'](arg1);
+}
+
 export function RebuildCombinedPDF(arg1, arg2, arg3) {
   return window['go']['main']['App']['RebuildCombinedPDF'](arg1, arg2, arg3);
 }

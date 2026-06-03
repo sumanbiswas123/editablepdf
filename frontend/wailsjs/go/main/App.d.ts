@@ -62,6 +62,8 @@ export function ListCompiledPDFs():Promise<Array<main.CompiledPDF>>;
 
 export function OpenDirectory():Promise<void>;
 
+export function ReadLocalFile(arg1:string):Promise<Record<string, string>>;
+
 export function RebuildCombinedPDF(arg1:string,arg2:Array<string>,arg3:Array<string>):Promise<string>;
 
 export function RenameCombinedPDF(arg1:string,arg2:string):Promise<void>;
