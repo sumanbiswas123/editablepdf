@@ -32,7 +32,9 @@ import {
   GetLocalIPAddresses,
   SaveRemotePDF,
   StartWSClient,
-  StopWSClient
+  StopWSClient,
+  CaptureCustomStateHTML,
+  CleanUpTempHTML
 } from '../wailsjs/go/main/App';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
@@ -82,12 +84,31 @@ export const App: React.FC = () => {
   const [targetMacCode, setTargetMacCode] = useState(() => localStorage.getItem('capture-mac-code') || '');
   const [controllerWS, setControllerWS] = useState<WebSocket | null>(null);
   const [wsConnectionState, setWsConnectionState] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [windowsIP, setWindowsIP] = useState('');
+  const pendingCleanupsRef = useRef<{ folder: string; file: string }[]>([]);
 
   // Logs for Mac Viewership Console
   const [viewershipLogs, setViewershipLogs] = useState<string[]>([]);
 
   // Accumulated Remote jobs for multipage crawl compilation
   const remoteJobsRef = useRef<any[]>([]);
+
+  // Fetch Windows Controller IP for routing
+  useEffect(() => {
+    const fetchWindowsIP = async () => {
+      try {
+        const ips = await GetLocalIPAddresses();
+        if (ips && ips.length > 0) {
+          setWindowsIP(ips[0]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch Windows local IP:", err);
+      }
+    };
+    if (osPlatform === 'windows') {
+      fetchWindowsIP();
+    }
+  }, [osPlatform]);
 
   // Detect OS platform
   useEffect(() => {
@@ -1788,6 +1809,17 @@ export const App: React.FC = () => {
 
           const filename = remoteFilenameRef.current || msg.filename;
           await SaveRemotePDF(filename, msg.data);
+
+          if (pendingCleanupsRef.current.length > 0) {
+            for (const cleanup of pendingCleanupsRef.current) {
+              try {
+                if (cleanup.file.startsWith('temp_state_')) {
+                  await CleanUpTempHTML(cleanup.folder, cleanup.file);
+                }
+              } catch (_) {}
+            }
+            pendingCleanupsRef.current = [];
+          }
           
           setCompilationProgress({
             phase: 'complete',
@@ -1861,16 +1893,32 @@ export const App: React.FC = () => {
           current: 1,
           total: 1,
           slide: activeSlide.name,
-          detail: 'Requesting Safari rendering on Mac...'
+          detail: 'Preparing slide state resources for Mac Performer...'
         });
+
+        let resolvedUrl = activeSlide.url;
+        if (capturedHtml) {
+          resolvedUrl = await CaptureCustomStateHTML(activeSlide.folderName, capturedHtml);
+        }
+
+        if (windowsIP) {
+          resolvedUrl = resolvedUrl.replace('127.0.0.1', windowsIP).replace('localhost', windowsIP);
+        }
 
         const job = {
           slideName: activeSlide.name,
           folderName: activeSlide.folderName,
-          url: activeSlide.url,
-          customHtml: capturedHtml,
+          url: resolvedUrl,
+          customHtml: '',
           tempFilename: ''
         };
+
+        const tempFile = resolvedUrl.split('/').pop() || '';
+        if (tempFile.startsWith('temp_state_')) {
+          pendingCleanupsRef.current = [{ folder: activeSlide.folderName, file: tempFile }];
+        } else {
+          pendingCleanupsRef.current = [];
+        }
 
         remoteFilenameRef.current = `${activeSlide.name}.pdf`;
         controllerWS?.send(JSON.stringify({
@@ -1987,9 +2035,51 @@ export const App: React.FC = () => {
 
             if (appMode === 'capture') {
               remoteFilenameRef.current = `auto_${activeSlide.name}.pdf`;
+              
+              setCompilationProgress({
+                phase: 'rendering',
+                current: 1,
+                total: remoteJobsRef.current.length,
+                slide: activeSlide.name,
+                detail: 'Preparing slide state resources for Mac Performer...'
+              });
+
+              const resolvedJobs = [];
+              const cleanups = [];
+              for (let i = 0; i < remoteJobsRef.current.length; i++) {
+                const j = remoteJobsRef.current[i];
+                let resolvedUrl = j.url;
+                if (j.customHtml) {
+                  resolvedUrl = await CaptureCustomStateHTML(j.folderName, j.customHtml);
+                }
+                if (windowsIP) {
+                  resolvedUrl = resolvedUrl.replace('127.0.0.1', windowsIP).replace('localhost', windowsIP);
+                }
+                const filename = resolvedUrl.split('/').pop() || '';
+                if (filename.startsWith('temp_state_')) {
+                  cleanups.push({ folder: j.folderName, file: filename });
+                }
+                resolvedJobs.push({
+                  ...j,
+                  url: resolvedUrl,
+                  customHtml: '',
+                  tempFilename: ''
+                });
+              }
+
+              pendingCleanupsRef.current = cleanups;
+
+              setCompilationProgress({
+                phase: 'rendering',
+                current: 1,
+                total: resolvedJobs.length,
+                slide: activeSlide.name,
+                detail: 'Requesting Safari rendering on Mac...'
+              });
+
               controllerWS?.send(JSON.stringify({
                 type: 'render_request',
-                jobs: remoteJobsRef.current
+                jobs: resolvedJobs
               }));
               remoteJobsRef.current = [];
             } else {
@@ -2111,6 +2201,39 @@ export const App: React.FC = () => {
           phase: 'merging',
           current: 95,
           total: 100,
+          slide: 'Preparing slide batch...',
+          detail: 'Mapping state resources to LAN IP...'
+        });
+
+        const resolvedJobs = [];
+        const cleanups = [];
+        for (let i = 0; i < remoteJobsRef.current.length; i++) {
+          const j = remoteJobsRef.current[i];
+          let resolvedUrl = j.url;
+          if (j.customHtml) {
+            resolvedUrl = await CaptureCustomStateHTML(j.folderName, j.customHtml);
+          }
+          if (windowsIP) {
+            resolvedUrl = resolvedUrl.replace('127.0.0.1', windowsIP).replace('localhost', windowsIP);
+          }
+          const filename = resolvedUrl.split('/').pop() || '';
+          if (filename.startsWith('temp_state_')) {
+            cleanups.push({ folder: j.folderName, file: filename });
+          }
+          resolvedJobs.push({
+            ...j,
+            url: resolvedUrl,
+            customHtml: '',
+            tempFilename: ''
+          });
+        }
+
+        pendingCleanupsRef.current = cleanups;
+
+        setCompilationProgress({
+          phase: 'merging',
+          current: 95,
+          total: 100,
           slide: 'Sending batch to Mac Performer...',
           detail: 'Requesting Safari rendering on Mac...'
         });
@@ -2120,7 +2243,7 @@ export const App: React.FC = () => {
 
         controllerWS?.send(JSON.stringify({
           type: 'render_request',
-          jobs: remoteJobsRef.current
+          jobs: resolvedJobs
         }));
         remoteJobsRef.current = [];
       } else {
