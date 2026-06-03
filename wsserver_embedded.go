@@ -98,7 +98,7 @@ func (r *WSRoom) notifyOwnerOfClients() {
 		return
 	}
 	r.mu.Lock()
-	var clientsList []string
+	clientsList := []string{}
 	for _, c := range r.clients {
 		if c.role == "windows" {
 			clientsList = append(clientsList, c.id[:8]) // Short client identifier

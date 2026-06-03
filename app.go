@@ -140,6 +140,9 @@ func (a *App) wsReadLoop(mode string) {
 			if ok && requester != "" {
 				go a.handleRenderRequest(jobsRaw, requester)
 			}
+		case "devices_list":
+			data, _ := msg["data"].(string)
+			wailsRuntime.EventsEmit(a.ctx, "devices_list_updated", data)
 		}
 	}
 }

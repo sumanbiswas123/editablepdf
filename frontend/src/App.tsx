@@ -139,11 +139,21 @@ export const App: React.FC = () => {
         setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
       });
 
+      const destroyDevicesEvent = EventsOn('devices_list_updated', (data: string) => {
+        try {
+          const list = JSON.parse(data);
+          setConnectedClients(list || []);
+        } catch (_) {}
+      });
+
       return () => {
         isStopped = true;
         StopWSClient();
         if (typeof destroyWSEvent === 'function') {
           destroyWSEvent();
+        }
+        if (typeof destroyDevicesEvent === 'function') {
+          destroyDevicesEvent();
         }
       };
     }
@@ -1799,7 +1809,7 @@ export const App: React.FC = () => {
         } else if (msg.type === 'devices_list') {
           try {
             const list = JSON.parse(msg.data);
-            setConnectedClients(list);
+            setConnectedClients(list || []);
           } catch (_) {}
         }
       } catch (err: any) {
@@ -2502,9 +2512,9 @@ export const App: React.FC = () => {
                 width: '8px',
                 height: '8px',
                 borderRadius: '50%',
-                backgroundColor: connectedClients.length > 0 ? 'var(--success)' : 'var(--text-3)'
+                backgroundColor: (connectedClients || []).length > 0 ? 'var(--success)' : 'var(--text-3)'
               }} />
-              <span>{connectedClients.length} Connected Controller(s)</span>
+              <span>{(connectedClients || []).length} Connected Controller(s)</span>
             </div>
           </div>
 
