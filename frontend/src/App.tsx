@@ -33,6 +33,7 @@ import {
   SaveRemotePDF,
   StartWSClient,
   StopWSClient,
+  StopWSClientForRoom,
   CaptureCustomStateHTML,
   CleanUpTempHTML,
   SyncWorkspaceToMac,
@@ -93,6 +94,42 @@ export const App: React.FC = () => {
   const [macIPAddresses, setMacIPAddresses] = useState<string[]>([]);
   const [macConnectionStatus, setMacConnectionStatus] = useState('Idle');
   
+  interface DeviceRoom {
+    code: string;
+    status: string;
+    logs: string[];
+    clients: string[];
+  }
+  const [deviceRooms, setDeviceRooms] = useState<DeviceRoom[]>([]);
+  const [genericModal, setGenericModal] = useState<{
+    title: string;
+    message: string;
+    type?: 'success' | 'error' | 'info';
+    onClose?: () => void;
+  } | null>(null);
+
+  const showModal = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info', onClose?: () => void) => {
+    setGenericModal({ title, message, type, onClose });
+  };
+
+  useEffect(() => {
+    window.alert = (message: string) => {
+      let title = "Notification";
+      let type: 'success' | 'error' | 'info' = 'info';
+      
+      const lower = message.toLowerCase();
+      if (lower.includes("failed") || lower.includes("error") || lower.includes("invalid") || lower.includes("timed out") || lower.includes("timed_out")) {
+        title = "Error Encountered";
+        type = "error";
+      } else if (lower.includes("success") || lower.includes("saved") || lower.includes("completed") || lower.includes("finished")) {
+        title = "Success";
+        type = "success";
+      }
+      
+      showModal(title, message, type);
+    };
+  }, []);
+
   // Windows Controller details
   const [targetMacIP, setTargetMacIP] = useState(() => localStorage.getItem('capture-mac-ip') || '');
   const [targetMacCode, setTargetMacCode] = useState(() => localStorage.getItem('capture-mac-code') || '');
@@ -100,6 +137,7 @@ export const App: React.FC = () => {
   const [wsConnectionState, setWsConnectionState] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [windowsIP, setWindowsIP] = useState('');
   const pendingCleanupsRef = useRef<{ folder: string; file: string }[]>([]);
+  const initializedRef = useRef(false);
 
   // Logs for Mac Viewership Console
   const [viewershipLogs, setViewershipLogs] = useState<string[]>([]);
@@ -145,47 +183,117 @@ export const App: React.FC = () => {
     detect();
   }, []);
 
+  const addDeviceRoom = async () => {
+    try {
+      const res = await fetch('http://127.0.0.1:8081/create-room');
+      const data = await res.json();
+      const code = data.room;
+
+      setDeviceRooms(prev => [
+        ...prev,
+        {
+          code,
+          status: 'Listening',
+          logs: [`[${new Date().toLocaleTimeString()}] Room ${code} created. Listening for controllers...`],
+          clients: []
+        }
+      ]);
+
+      await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
+    } catch (err: any) {
+      console.error(err);
+      showModal("Error", `Failed to add device room: ${err.message || err}`, "error");
+    }
+  };
+
+  const removeDeviceRoom = async (code: string) => {
+    try {
+      await StopWSClientForRoom(code);
+      setDeviceRooms(prev => prev.filter(r => r.code !== code));
+    } catch (err: any) {
+      console.error(err);
+      showModal("Error", `Failed to remove device room: ${err.message || err}`, "error");
+    }
+  };
+
   // Initialize Mac Performer Mode
   useEffect(() => {
     if (appMode === 'capture' && osPlatform === 'darwin') {
+      if (initializedRef.current) return;
+      initializedRef.current = true;
       let isStopped = false;
       const initMacPerformer = async () => {
         try {
-          setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Starting Embedded WS Server on port 8081...`]);
           await StartEmbeddedWSServer();
-          
           const ips = await GetLocalIPAddresses();
-          setMacIPAddresses(ips);
-
-          setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Requesting unique 6-digit pairing code...`]);
-          
-          const res = await fetch('http://127.0.0.1:8081/create-room');
-          const data = await res.json();
-          if (isStopped) return;
-          const code = data.room;
-          setMacPairingCode(code);
-
-          setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Connecting Wails backend to room ${code}...`]);
-          await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
-          setMacConnectionStatus('Listening');
-          setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Viewership active. Ready to render safari-matched ePDFs.`]);
+          if (!isStopped) {
+            setMacIPAddresses(ips);
+            // Spawn the first device room automatically if none exist yet
+            setDeviceRooms(rooms => {
+              if (rooms.length === 0) {
+                addDeviceRoom();
+              }
+              return rooms;
+            });
+          }
         } catch (err: any) {
           console.error(err);
-          setViewershipLogs(prev => [...prev, `[ERROR] Failed to start Performer: ${err.message || err}`]);
         }
       };
 
       initMacPerformer();
 
       // Listen for Go wails events
-      const destroyWSEvent = safeEventsOn('viewership_event', (msg: string) => {
-        setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+      const destroyWSEvent = safeEventsOn('viewership_event', (eventData: any) => {
+        let room = "";
+        let message = "";
+        if (eventData && typeof eventData === 'object' && eventData.room) {
+          room = eventData.room;
+          message = eventData.message;
+        } else if (typeof eventData === 'string') {
+          message = eventData;
+        }
+
+        if (room) {
+          setDeviceRooms(prev => prev.map(r => r.code === room ? {
+            ...r,
+            logs: [...r.logs, `[${new Date().toLocaleTimeString()}] ${message}`]
+          } : r));
+        } else {
+          setDeviceRooms(prev => prev.map((r, i) => i === 0 ? {
+            ...r,
+            logs: [...r.logs, `[${new Date().toLocaleTimeString()}] ${message}`]
+          } : r));
+        }
+
+        if (message.includes("Finished rendering!")) {
+          showModal("Render Success", `Successfully rendered and sent PDF for device Room ${room || 'Default'}!`, "success");
+        }
       });
 
-      const destroyDevicesEvent = safeEventsOn('devices_list_updated', (data: string) => {
+      const destroyDevicesEvent = safeEventsOn('devices_list_updated', (eventData: any) => {
+        let room = "";
+        let dataStr = "";
+        if (eventData && typeof eventData === 'object' && eventData.room) {
+          room = eventData.room;
+          dataStr = eventData.data;
+        } else if (typeof eventData === 'string') {
+          dataStr = eventData;
+        }
+
         try {
-          const list = JSON.parse(data);
-          setConnectedClients(list || []);
+          const list = JSON.parse(dataStr);
+          if (room) {
+            setDeviceRooms(prev => prev.map(r => r.code === room ? {
+              ...r,
+              clients: list || []
+            } : r));
+          } else {
+            setDeviceRooms(prev => prev.map((r, i) => i === 0 ? {
+              ...r,
+              clients: list || []
+            } : r));
+          }
         } catch (_) {}
       });
 
@@ -1909,6 +2017,8 @@ export const App: React.FC = () => {
             detail: `Saved successfully: ${filename}`
           });
           
+          showModal("Compilation Success", `ePDF file saved successfully inside your output directory: ${filename}`, "success");
+
           setTimeout(async () => {
             setIsCompiling(false);
             setIsSingleSave(false);
@@ -1919,7 +2029,12 @@ export const App: React.FC = () => {
           setIsCompiling(false);
           setIsSingleSave(false);
           setCompilationProgress(null);
-          alert(`Mac Compilation failed: ${msg.message}`);
+          if (msg.message && msg.message.includes("already in use")) {
+            showModal("Connection Rejected", "This pairing code is already in use by another device. Please generate a new pairing code on the Mac Performer.", "error");
+            ws.close();
+          } else {
+            showModal("Mac Compilation Failed", msg.message, "error");
+          }
         } else if (msg.type === 'devices_list') {
           try {
             const list = JSON.parse(msg.data);
@@ -1951,7 +2066,7 @@ export const App: React.FC = () => {
         setIsCompiling(false);
         setIsSingleSave(false);
         setCompilationProgress(null);
-        alert(`Error processing WS message: ${err.message || err}`);
+        showModal("Error", `Error processing WS message: ${err.message || err}`, "error");
       }
     };
 
@@ -1964,7 +2079,7 @@ export const App: React.FC = () => {
       console.error("WS error:", err);
       setWsConnectionState('disconnected');
       setControllerWS(null);
-      alert("Failed to connect to Mac Viewership. Please verify the IP Address, pairing code, and network connection.");
+      showModal("Connection Failed", "Failed to connect to Mac Viewership. Please verify the IP Address, pairing code, and network connection.", "error");
     };
   };
 
@@ -2029,7 +2144,10 @@ export const App: React.FC = () => {
           tempFilename: ''
         };
 
-        remoteFilenameRef.current = `${activeSlide.name}.pdf`;
+        const nextPath = await GenerateNextSequentialPDFPath();
+        const filename = nextPath.substring(Math.max(nextPath.lastIndexOf('/'), nextPath.lastIndexOf('\\')) + 1);
+        remoteFilenameRef.current = filename;
+
         controllerWS?.send(JSON.stringify({
           type: 'render_request',
           jobs: [job]
@@ -2144,7 +2262,9 @@ export const App: React.FC = () => {
             });
 
             if (appMode === 'capture') {
-              remoteFilenameRef.current = `auto_${activeSlide.name}.pdf`;
+              const nextPath = await GenerateNextAutoSlidePDFPath(currentSlideIndex);
+              const filename = nextPath.substring(Math.max(nextPath.lastIndexOf('/'), nextPath.lastIndexOf('\\')) + 1);
+              remoteFilenameRef.current = filename;
               
               setCompilationProgress({
                 phase: 'rendering',
@@ -2371,6 +2491,46 @@ export const App: React.FC = () => {
   const onCompileDeck = async () => {
     if (slides.length === 0 || isCompiling) return;
 
+    if (appMode === 'capture') {
+      if (wsConnectionState !== 'connected' || !controllerWS) {
+        showModal("Connection Required", "Please connect to Mac Viewership first.", "info");
+        return;
+      }
+      try {
+        setIsCompiling(true);
+        setCompilationProgress({
+          phase: 'rendering',
+          current: 1,
+          total: slides.length,
+          slide: 'All presentation decks',
+          detail: 'Preparing slide state resources for Mac Performer...'
+        });
+
+        const jobs = slides.map((s) => ({
+          slideName: s.name,
+          folderName: s.folderName,
+          url: s.url,
+          customHtml: '',
+          tempFilename: ''
+        }));
+
+        const nextPath = await GenerateDeckAutoSavePath();
+        const filename = nextPath.substring(Math.max(nextPath.lastIndexOf('/'), nextPath.lastIndexOf('\\')) + 1);
+        remoteFilenameRef.current = filename;
+
+        controllerWS?.send(JSON.stringify({
+          type: 'render_request',
+          jobs: jobs
+        }));
+      } catch (err: any) {
+        console.error('Deck compilation failed:', err);
+        showModal("Compile Deck Failed", err.message || err, "error");
+        setIsCompiling(false);
+        setCompilationProgress(null);
+      }
+      return;
+    }
+
     try {
       setIsCompiling(true);
       setCompilationProgress({
@@ -2393,7 +2553,7 @@ export const App: React.FC = () => {
       await refreshPDFList();
     } catch (err: any) {
       console.error('Deck compilation failed:', err);
-      alert(`Compile Deck failed: ${err.message || err}`);
+      showModal("Compile Deck Failed", err.message || err, "error");
     } finally {
       setIsCompiling(false);
       setCompilationProgress(null);
@@ -2603,170 +2763,281 @@ export const App: React.FC = () => {
   if (appMode === 'capture' && osPlatform === 'darwin') {
     return (
       <div 
-        className="app-container" 
+        className="app-container animate-fade-in" 
         style={{ 
           height: '100vh', 
           display: 'flex', 
           flexDirection: 'column', 
-          backgroundColor: 'var(--bg-deep)',
-          padding: '24px'
+          background: 'radial-gradient(circle at 10% 20%, rgba(0, 242, 254, 0.08) 0%, transparent 40%), radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 40%), radial-gradient(circle at 50% 50%, rgba(7, 8, 20, 1) 0%, rgba(11, 14, 28, 1) 100%)',
+          padding: '24px',
+          overflow: 'hidden'
         }}
       >
+        <style dangerouslySetInnerHTML={{__html: `
+          @keyframes glowPulse {
+            0% { box-shadow: 0 0 10px rgba(0, 242, 254, 0.1), inset 0 1px 0 0 rgba(255, 255, 255, 0.1); }
+            50% { box-shadow: 0 0 20px rgba(0, 242, 254, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.2); }
+            100% { box-shadow: 0 0 10px rgba(0, 242, 254, 0.1), inset 0 1px 0 0 rgba(255, 255, 255, 0.1); }
+          }
+          .liquid-glass-card {
+            background: rgba(255, 255, 255, 0.03) !important;
+            backdrop-filter: blur(25px) saturate(190%) !important;
+            -webkit-backdrop-filter: blur(25px) saturate(190%) !important;
+            border: 1px solid rgba(255, 255, 255, 0.07) !important;
+            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 10px 40px rgba(0, 0, 0, 0.4) !important;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+          }
+          .liquid-glass-card:hover {
+            background: rgba(255, 255, 255, 0.05) !important;
+            border-color: rgba(0, 242, 254, 0.25) !important;
+            transform: translateY(-5px) scale(1.01);
+            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.15), 0 15px 50px rgba(0, 242, 254, 0.1) !important;
+          }
+          .liquid-add-card {
+            border: 1px dashed rgba(255, 255, 255, 0.15) !important;
+            background: rgba(255, 255, 255, 0.01) !important;
+            backdrop-filter: blur(25px) saturate(190%) !important;
+            -webkit-backdrop-filter: blur(25px) saturate(190%) !important;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+          }
+          .liquid-add-card:hover {
+            border-color: var(--accent) !important;
+            background: rgba(0, 242, 254, 0.03) !important;
+            transform: translateY(-5px);
+            box-shadow: 0 15px 50px rgba(0, 242, 254, 0.08) !important;
+          }
+        `}} />
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexShrink: 0 }}>
           <div>
-            <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-1)' }}>
-              Mac Viewership Performer
+            <h1 style={{ fontSize: '26px', fontWeight: 900, background: 'linear-gradient(135deg, #ffffff 30%, rgba(255,255,255,0.7) 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.7px' }}>
+              🖥️ Mac Performer Viewership Dashboard
             </h1>
-            <p style={{ fontSize: '12px', color: 'var(--text-3)', fontWeight: 500 }}>
-              WebSocket Engine Status: <span style={{ color: 'var(--success)', fontWeight: 700 }}>{macConnectionStatus}</span>
-            </p>
-          </div>
-          <button 
-            onClick={() => setAppMode('select')}
-            style={{
-              backgroundColor: 'var(--bg-raised)',
-              border: '1px solid var(--border-1)',
-              color: 'var(--text-2)',
-              padding: '6px 14px',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            ← Reset Mode
-          </button>
-        </div>
-
-        {/* Viewership Empty Space Screen Layout */}
-        <div style={{ display: 'flex', gap: '20px', flex: 1, overflow: 'hidden' }}>
-          {/* Main Info Board */}
-          <div 
-            className="glass-panel" 
-            style={{ 
-              flex: 1, 
-              borderRadius: 'var(--radius-lg)', 
-              padding: '40px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              textAlign: 'center',
-              gap: '24px',
-              border: '1px solid var(--border-accent)',
-              boxShadow: '0 8px 32px rgba(0, 242, 254, 0.03)'
-            }}
-          >
-            <div style={{ fontSize: '48px' }}>🖥️</div>
-            <div>
-              <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-1)' }}>
-                Safari Rendering Viewership Active
-              </h2>
-              <p style={{ color: 'var(--text-2)', fontSize: '13px', marginTop: '6px', maxWidth: '440px', margin: '6px auto 0' }}>
-                This Mac is now serving as the Performer node. Connect from any Windows Controller on your network to render pixel-perfect Safari-styled PDFs.
-              </p>
-            </div>
-
-            {/* Glowing 6-digit code */}
-            <div style={{
-              padding: '24px 40px',
-              borderRadius: 'var(--radius-xl)',
-              background: 'rgba(0, 242, 254, 0.03)',
-              border: '2px dashed var(--accent)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '6px'
-            }}>
-              <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '2px', textTransform: 'uppercase' }}>
-                Pairing Room Code
-              </span>
-              <span style={{ 
-                fontSize: '42px', 
-                fontWeight: 900, 
-                color: 'var(--text-1)', 
-                fontFamily: 'var(--font-mono)', 
-                letterSpacing: '6px',
-                textShadow: '0 0 20px rgba(0, 242, 254, 0.4)'
-              }}>
-                {macPairingCode || '------'}
-              </span>
-            </div>
-
-            {/* local network IPs */}
-            <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>
-              <strong style={{ color: 'var(--text-2)' }}>Target Mac Network IPs:</strong>{' '}
+            <p style={{ fontSize: '13px', color: 'var(--text-3)', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Target Mac Network IPs:</span>
               {macIPAddresses.length > 0 ? (
                 macIPAddresses.map((ip, i) => (
                   <span key={ip} style={{ 
                     fontFamily: 'var(--font-mono)', 
                     color: 'var(--accent)', 
-                    fontWeight: 700,
-                    marginRight: '8px'
+                    fontWeight: 700, 
+                    backgroundColor: 'rgba(0, 242, 254, 0.08)',
+                    border: '1px solid rgba(0, 242, 254, 0.15)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    fontSize: '11.5px'
                   }}>
-                    {ip}{i < macIPAddresses.length - 1 ? ',' : ''}
+                    {ip}
                   </span>
                 ))
               ) : (
-                <span>Detecting local IPs...</span>
+                <span style={{ color: 'var(--text-muted)' }}>Detecting local IPs...</span>
               )}
-            </div>
-
-            {/* Paired devices counter */}
-            <div style={{ fontSize: '12px', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: (connectedClients || []).length > 0 ? 'var(--success)' : 'var(--text-3)'
-              }} />
-              <span>{(connectedClients || []).length} Connected Controller(s)</span>
-            </div>
+            </p>
           </div>
-
-          {/* Activity Console Logs Log */}
-          <div 
-            className="glass-panel" 
-            style={{ 
-              width: '380px', 
-              borderRadius: 'var(--radius-lg)', 
-              display: 'flex', 
-              flexDirection: 'column',
-              overflow: 'hidden'
+          <button 
+            onClick={() => {
+              initializedRef.current = false;
+              setAppMode('select');
+            }}
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              backdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              color: '#ffffff',
+              padding: '8px 18px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1)',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+              e.currentTarget.style.borderColor = 'var(--accent)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
             }}
           >
-            <div style={{ 
-              padding: '12px 16px', 
-              borderBottom: '1px solid var(--border-1)', 
-              fontSize: '12px', 
-              fontWeight: 700, 
-              color: 'var(--text-2)',
-              backgroundColor: 'var(--bg-raised)'
-            }}>
-              Activity Console Logs
+            ← Reset Role Mode
+          </button>
+        </div>
+
+        {/* Dashboard Grid Container */}
+        <div style={{
+          flex: 1,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
+          gap: '24px',
+          overflowY: 'auto',
+          paddingBottom: '24px'
+        }}>
+          {deviceRooms.map((room) => (
+            <div 
+              key={room.code}
+              className="liquid-glass-card"
+              style={{
+                borderRadius: '24px',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '420px',
+                overflow: 'hidden',
+                position: 'relative'
+              }}
+            >
+              {/* Card Header */}
+              <div style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: 'rgba(255, 255, 255, 0.015)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    backgroundColor: room.clients.length > 0 ? 'var(--success)' : 'rgba(255,255,255,0.3)',
+                    boxShadow: room.clients.length > 0 ? '0 0 10px var(--success)' : 'none'
+                  }} />
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: room.clients.length > 0 ? '#ffffff' : 'var(--text-3)', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
+                    {room.clients.length > 0 ? `${room.clients.length} Controller Paired` : 'Waiting for controller'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => removeDeviceRoom(room.code)}
+                  style={{
+                    background: 'rgba(244, 63, 94, 0.06)',
+                    border: '1px solid rgba(244, 63, 94, 0.2)',
+                    color: '#f43f5e',
+                    fontSize: '10.5px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    padding: '4px 10px',
+                    borderRadius: '8px',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(244, 63, 94, 0.15)';
+                    e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.4)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(244, 63, 94, 0.06)';
+                    e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.2)';
+                  }}
+                >
+                  Disconnect
+                </button>
+              </div>
+
+              {/* Card Body - Pairing Code */}
+              <div style={{
+                padding: '24px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '6px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                backgroundColor: 'rgba(0, 0, 0, 0.15)'
+              }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase' }}>
+                  Pairing Room Code
+                </span>
+                <span style={{
+                  fontSize: '36px',
+                  fontWeight: 900,
+                  color: '#ffffff',
+                  fontFamily: 'var(--font-mono)',
+                  letterSpacing: '5px',
+                  textShadow: '0 0 20px rgba(0, 242, 254, 0.4)'
+                }}>
+                  {room.code}
+                </span>
+              </div>
+
+              {/* Card Console Logs */}
+              <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  padding: '8px 16px',
+                  fontSize: '9.5px',
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  color: 'var(--text-3)',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                  backgroundColor: 'rgba(255,255,255,0.01)'
+                }}>
+                  Activity Log
+                </div>
+                <div style={{
+                  flex: 1,
+                  padding: '14px 18px',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '10px',
+                  color: 'rgba(255, 255, 255, 0.8)',
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.25)'
+                }}>
+                  {room.logs.map((log, i) => (
+                    <div key={i} style={{
+                      lineHeight: '1.45',
+                      color: log.includes('[ERROR]') ? '#f43f5e' : log.includes('Success') || log.includes('Finished') ? 'var(--success)' : 'rgba(255, 255, 255, 0.75)'
+                    }}>
+                      {log}
+                    </div>
+                  ))}
+                  {room.logs.length === 0 && (
+                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Console logs will print here...</div>
+                  )}
+                </div>
+              </div>
             </div>
-            <div style={{ 
-              flex: 1, 
-              padding: '16px', 
-              fontFamily: 'var(--font-mono)', 
-              fontSize: '11px', 
-              color: 'var(--text-3)', 
-              overflowY: 'auto',
+          ))}
+
+          {/* Add Device Button Card */}
+          <div 
+            onClick={addDeviceRoom}
+            className="liquid-add-card"
+            style={{
+              borderRadius: '24px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '8px'
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '420px',
+              cursor: 'pointer',
+              gap: '16px',
+              textAlign: 'center',
+              padding: '24px'
+            }}
+          >
+            <div style={{
+              fontSize: '48px',
+              background: 'linear-gradient(135deg, var(--accent) 0%, var(--blue) 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              fontWeight: 200,
+              textShadow: '0 0 20px rgba(0, 242, 254, 0.3)'
             }}>
-              {viewershipLogs.map((log, i) => (
-                <div key={i} style={{ 
-                  lineHeight: '1.5',
-                  color: log.includes('[ERROR]') ? 'var(--rose)' : log.includes('Success') || log.includes('Finished') ? 'var(--success)' : 'var(--text-2)'
-                }}>
-                  {log}
-                </div>
-              ))}
-              {viewershipLogs.length === 0 && (
-                <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Console logs will print here...</div>
-              )}
+              +
+            </div>
+            <div>
+              <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#ffffff' }}>Add Device Pairing Room</h3>
+              <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.5)', marginTop: '8px', maxWidth: '240px', lineHeight: '1.5' }}>
+                Spawns a new pairing room code to connect another Windows Controller concurrently.
+              </p>
             </div>
           </div>
         </div>
@@ -3165,6 +3436,83 @@ export const App: React.FC = () => {
           onConfirm={confirmModalData.onConfirm}
           onCancel={confirmModalData.onCancel}
         />
+      )}
+
+      {/* 8. Beautiful Custom Glassmorphism Alert Modal */}
+      {genericModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(7, 8, 20, 0.75)',
+          backdropFilter: 'blur(10px)',
+          display: 'flex',
+          animation: 'fadeIn 0.2s ease-out',
+          zIndex: 99999,
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div style={{
+            background: 'var(--bg-glass)',
+            border: '1px solid var(--border-accent)',
+            borderRadius: 'var(--radius-xl)',
+            padding: '32px',
+            width: '420px',
+            maxWidth: '90%',
+            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.4)',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '16px'
+          }}>
+            <div style={{
+              fontSize: '48px'
+            }}>
+              {genericModal.type === 'success' ? '🎉' : genericModal.type === 'error' ? '❌' : 'ℹ️'}
+            </div>
+            <h3 style={{
+              fontSize: '18px',
+              fontWeight: 800,
+              color: 'var(--text-1)',
+              margin: 0
+            }}>
+              {genericModal.title}
+            </h3>
+            <p style={{
+              fontSize: '13px',
+              color: 'var(--text-2)',
+              lineHeight: '1.6',
+              margin: 0
+            }}>
+              {genericModal.message}
+            </p>
+            <button
+              onClick={() => {
+                if (genericModal.onClose) {
+                  genericModal.onClose();
+                }
+                setGenericModal(null);
+              }}
+              style={{
+                background: 'linear-gradient(135deg, var(--accent) 0%, var(--blue) 100%)',
+                border: 'none',
+                color: '#07080a',
+                padding: '10px 24px',
+                borderRadius: '8px',
+                fontWeight: 800,
+                fontSize: '13px',
+                cursor: 'pointer',
+                transition: 'transform 0.1s ease, box-shadow 0.2s',
+                marginTop: '12px'
+              }}
+            >
+              Okay
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

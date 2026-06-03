@@ -62,6 +62,10 @@ export function CompileSlidesToPDF(arg1, arg2, arg3) {
   return window['go']['main']['App']['CompileSlidesToPDF'](arg1, arg2, arg3);
 }
 
+export function CompileSlidesToPDFForRoom(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CompileSlidesToPDFForRoom'](arg1, arg2, arg3, arg4);
+}
+
 export function DeleteCompiledPDF(arg1) {
   return window['go']['main']['App']['DeleteCompiledPDF'](arg1);
 }
@@ -184,6 +188,10 @@ export function StartWSClient(arg1, arg2, arg3) {
 
 export function StopWSClient() {
   return window['go']['main']['App']['StopWSClient']();
+}
+
+export function StopWSClientForRoom(arg1) {
+  return window['go']['main']['App']['StopWSClientForRoom'](arg1);
 }
 
 export function SyncWorkspaceToMac() {

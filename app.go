@@ -58,9 +58,15 @@ type App struct {
 	pdfTempDir          string
 	pdfPaths            []string
 	// WebSocket client for Mac control
-	wsConn     *websocket.Conn
-	wsSendMu   sync.Mutex
-	wsStopCh   chan struct{}
+	wsConns    map[string]*WSConnection
+	wsConnsMu  sync.RWMutex
+}
+
+type WSConnection struct {
+	conn     *websocket.Conn
+	sendMu   sync.Mutex
+	stopCh   chan struct{}
+	roomCode string
 }
 
 // NewApp creates a new App application struct
@@ -77,9 +83,16 @@ func (a *App) startup(ctx context.Context) {
 // StartWSClient starts a WebSocket client that connects to the given server and room as a Mac role.
 // mode is either "builder" or "capture" and affects behavior.
 func (a *App) StartWSClient(serverURL, room, mode string) error {
-	if a.wsConn != nil {
-		return fmt.Errorf("ws client already running")
+	a.wsConnsMu.Lock()
+	if a.wsConns == nil {
+		a.wsConns = make(map[string]*WSConnection)
 	}
+	if _, exists := a.wsConns[room]; exists {
+		a.wsConnsMu.Unlock()
+		return fmt.Errorf("ws client already running for room %s", room)
+	}
+	a.wsConnsMu.Unlock()
+
 	if serverURL == "" {
 		serverURL = "ws://127.0.0.1:8081/ws"
 	}
@@ -88,37 +101,69 @@ func (a *App) StartWSClient(serverURL, room, mode string) error {
 	if err != nil {
 		return err
 	}
-	a.wsConn = conn
-	a.wsStopCh = make(chan struct{})
 
-	go a.wsReadLoop(mode)
+	wsc := &WSConnection{
+		conn:     conn,
+		stopCh:   make(chan struct{}),
+		roomCode: room,
+	}
+
+	a.wsConnsMu.Lock()
+	a.wsConns[room] = wsc
+	a.wsConnsMu.Unlock()
+
+	go a.wsReadLoopForRoom(wsc, mode)
 	return nil
 }
 
-// StopWSClient stops the running WebSocket client, if any.
-func (a *App) StopWSClient() error {
-	if a.wsConn == nil {
+// StopWSClientForRoom stops the running WebSocket client for a specific room.
+func (a *App) StopWSClientForRoom(room string) error {
+	a.wsConnsMu.Lock()
+	wsc, ok := a.wsConns[room]
+	if ok {
+		delete(a.wsConns, room)
+	}
+	a.wsConnsMu.Unlock()
+
+	if !ok {
 		return nil
 	}
-	close(a.wsStopCh)
-	a.wsSendMu.Lock()
-	_ = a.wsConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	a.wsSendMu.Unlock()
-	_ = a.wsConn.Close()
-	a.wsConn = nil
+
+	close(wsc.stopCh)
+	wsc.sendMu.Lock()
+	_ = wsc.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	wsc.sendMu.Unlock()
+	_ = wsc.conn.Close()
 	return nil
 }
 
-func (a *App) wsReadLoop(mode string) {
+// StopWSClient stops all active running WebSocket clients.
+func (a *App) StopWSClient() error {
+	a.wsConnsMu.Lock()
+	var rooms []string
+	for r := range a.wsConns {
+		rooms = append(rooms, r)
+	}
+	a.wsConnsMu.Unlock()
+
+	for _, r := range rooms {
+		_ = a.StopWSClientForRoom(r)
+	}
+	return nil
+}
+
+func (a *App) wsReadLoopForRoom(wsc *WSConnection, mode string) {
+	roomCode := wsc.roomCode
 	for {
 		select {
-		case <-a.wsStopCh:
+		case <-wsc.stopCh:
 			return
 		default:
 		}
 		var msg map[string]interface{}
-		if err := a.wsConn.ReadJSON(&msg); err != nil {
+		if err := wsc.conn.ReadJSON(&msg); err != nil {
 			// connection closed or error
+			_ = a.StopWSClientForRoom(roomCode)
 			return
 		}
 		t, _ := msg["type"].(string)
@@ -127,20 +172,13 @@ func (a *App) wsReadLoop(mode string) {
 			cmd, _ := msg["cmd"].(string)
 			target, _ := msg["target"].(string)
 			if cmd == "capture" {
-				go a.handleCaptureCommand(target)
-			} else if cmd == "auto" {
-				// TODO: implement auto-slide orchestration
-			} else if cmd == "save" {
-				// TODO: implement save page
+				go a.handleCaptureCommandForRoom(roomCode, target)
 			}
 		case "render_request":
-			// payload should contain slide info or jobs
-			// expect msg.Data contains jobs JSON or URL
-			// We'll accept a simple form: { type: 'render_request', jobs: [...] }
 			jobsRaw, ok := msg["jobs"]
 			requester, _ := msg["senderId"].(string)
 			if ok && requester != "" {
-				go a.handleRenderRequest(jobsRaw, requester)
+				go a.handleRenderRequestForRoom(wsc, jobsRaw, requester)
 			}
 		case "sync_workspace":
 			dataStr, _ := msg["data"].(string)
@@ -165,73 +203,125 @@ func (a *App) wsReadLoop(mode string) {
 			}
 		case "devices_list":
 			data, _ := msg["data"].(string)
-			wailsRuntime.EventsEmit(a.ctx, "devices_list_updated", data)
+			wailsRuntime.EventsEmit(a.ctx, "devices_list_updated", map[string]interface{}{
+				"room": roomCode,
+				"data": data,
+			})
 		}
 	}
 }
 
 func (a *App) sendWS(msg interface{}) error {
-	a.wsSendMu.Lock()
-	defer a.wsSendMu.Unlock()
-	if a.wsConn == nil {
+	a.wsConnsMu.RLock()
+	var wsc *WSConnection
+	for _, conn := range a.wsConns {
+		wsc = conn
+		break
+	}
+	a.wsConnsMu.RUnlock()
+
+	if wsc == nil {
 		return fmt.Errorf("ws not connected")
 	}
-	return a.wsConn.WriteJSON(msg)
+
+	wsc.sendMu.Lock()
+	defer wsc.sendMu.Unlock()
+	return wsc.conn.WriteJSON(msg)
 }
 
-// handleCaptureCommand performs a single-capture action for the given room (target)
+func (a *App) sendWSForRoom(room string, msg interface{}) error {
+	a.wsConnsMu.RLock()
+	wsc, ok := a.wsConns[room]
+	a.wsConnsMu.RUnlock()
+
+	if !ok {
+		return a.sendWS(msg)
+	}
+
+	wsc.sendMu.Lock()
+	defer wsc.sendMu.Unlock()
+	return wsc.conn.WriteJSON(msg)
+}
+
+func (a *App) emitViewershipEvent(roomCode string, msg string) {
+	wailsRuntime.EventsEmit(a.ctx, "viewership_event", map[string]string{
+		"room":    roomCode,
+		"message": msg,
+	})
+}
+
+// handleCaptureCommand performs a single-capture action for the first active room (fallback)
 func (a *App) handleCaptureCommand(targetRoom string) {
-	// For a simple capture, we can render the current presentation slide(s) to PDF
-	// Here we'll attempt to call existing AutoCompileSlidePDF or CompileSlidesToPDF paths
-	// This is a simplified example: capture current slide as a single page PDF and send back
-	// Build a minimal ExportJob list; in a real integration the jobs would be provided by the requester
+	a.wsConnsMu.RLock()
+	var roomCode string
+	for r := range a.wsConns {
+		roomCode = r
+		break
+	}
+	a.wsConnsMu.RUnlock()
+	a.handleCaptureCommandForRoom(roomCode, targetRoom)
+}
+
+func (a *App) handleCaptureCommandForRoom(room string, targetRoom string) {
 	job := ExportJob{SlideName: "capture", FolderName: "", URL: "http://127.0.0.1:0/"}
-	// Use CompileSlidesToPDF if available - here we will attempt an AutoCompileSlidePDF
 	out, err := a.AutoCompileSlidePDF(job, 200)
 	if err != nil {
-		_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error()})
+		_ = a.sendWSForRoom(room, map[string]interface{}{"type": "error", "message": err.Error(), "target": targetRoom})
 		return
 	}
-	// Read PDF bytes and send back to all in room as 'file' or to a specific requester
 	b, err := os.ReadFile(out)
 	if err != nil {
-		_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error()})
+		_ = a.sendWSForRoom(room, map[string]interface{}{"type": "error", "message": err.Error(), "target": targetRoom})
 		return
 	}
 	payload := base64.StdEncoding.EncodeToString(b)
-	_ = a.sendWS(map[string]interface{}{"type": "file", "data": payload, "filename": filepath.Base(out), "mimetype": "application/pdf", "target": targetRoom})
+	_ = a.sendWSForRoom(room, map[string]interface{}{"type": "file", "data": payload, "filename": filepath.Base(out), "mimetype": "application/pdf", "target": targetRoom})
 }
 
 func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
-	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Received render request from client %s", requester))
-	// jobsRaw expected to be []interface{} map-compatible
+	a.wsConnsMu.RLock()
+	var wsc *WSConnection
+	for _, conn := range a.wsConns {
+		wsc = conn
+		break
+	}
+	a.wsConnsMu.RUnlock()
+	if wsc != nil {
+		a.handleRenderRequestForRoom(wsc, jobsRaw, requester)
+	}
+}
+
+func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{}, requester string) {
+	roomCode := wsc.roomCode
+	a.emitViewershipEvent(roomCode, fmt.Sprintf("Received render request from client %s", requester))
+	
 	rawSlice, ok := jobsRaw.([]interface{})
 	if !ok {
-		// try if it's a JSON string
 		if s, ok2 := jobsRaw.(string); ok2 {
 			var parsed []ExportJob
 			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
 				jobs := parsed
-				wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Rendering %d slides locally...", len(jobs)))
-				outPath, err := a.CompileSlidesToPDF(jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
+				a.emitViewershipEvent(roomCode, fmt.Sprintf("Rendering %d slides locally...", len(jobs)))
+				outPath, err := a.CompileSlidesToPDFForRoom(roomCode, jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
 				if err != nil {
-					wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Render error: %s", err.Error()))
+					a.emitViewershipEvent(roomCode, fmt.Sprintf("Render error: %s", err.Error()))
 					if strings.Contains(err.Error(), "net::ERR_CONNECTION_TIMED_OUT") || strings.Contains(err.Error(), "net::ERR_ADDRESS_UNREACHABLE") {
-						wailsRuntime.EventsEmit(a.ctx, "viewership_event", "💡 Troubleshooting tip: Ensure both devices are on the exact same Wi-Fi network, client isolation is disabled on the router, and Windows Firewall permits incoming connections on the dynamic port.")
+						a.emitViewershipEvent(roomCode, "💡 Troubleshooting tip: Ensure both devices are on the exact same Wi-Fi network, client isolation is disabled on the router, and Windows Firewall permits incoming connections on the dynamic port.")
 					}
-					_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
+					_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
 					return
 				}
 				b, _ := os.ReadFile(outPath)
-				wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
-				_ = a.sendWS(map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": filepath.Base(outPath), "mimetype": "application/pdf", "target": requester})
+				a.emitViewershipEvent(roomCode, fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
+				_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": filepath.Base(outPath), "mimetype": "application/pdf", "target": requester})
 				return
 			}
 		}
-		wailsRuntime.EventsEmit(a.ctx, "viewership_event", "Render error: invalid jobs payload")
-		_ = a.sendWS(map[string]interface{}{"type": "error", "message": "invalid jobs", "target": requester})
+		a.emitViewershipEvent(roomCode, "Render error: invalid jobs payload")
+		_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "error", "message": "invalid jobs", "target": requester})
 		return
 	}
+	
 	var jobs []ExportJob
 	for _, item := range rawSlice {
 		if m, ok := item.(map[string]interface{}); ok {
@@ -243,19 +333,25 @@ func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
 			jobs = append(jobs, job)
 		}
 	}
-	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Rendering %d slides locally...", len(jobs)))
-	outPath, err := a.CompileSlidesToPDF(jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
+	a.emitViewershipEvent(roomCode, fmt.Sprintf("Rendering %d slides locally...", len(jobs)))
+	outPath, err := a.CompileSlidesToPDFForRoom(roomCode, jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
 	if err != nil {
-		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Render error: %s", err.Error()))
+		a.emitViewershipEvent(roomCode, fmt.Sprintf("Render error: %s", err.Error()))
 		if strings.Contains(err.Error(), "net::ERR_CONNECTION_TIMED_OUT") || strings.Contains(err.Error(), "net::ERR_ADDRESS_UNREACHABLE") {
-			wailsRuntime.EventsEmit(a.ctx, "viewership_event", "💡 Troubleshooting tip: Ensure both devices are on the exact same Wi-Fi network, client isolation is disabled on the router, and Windows Firewall permits incoming connections on the dynamic port.")
+			a.emitViewershipEvent(roomCode, "💡 Troubleshooting tip: Ensure both devices are on the exact same Wi-Fi network, client isolation is disabled on the router, and Windows Firewall permits incoming connections on the dynamic port.")
 		}
-		_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
+		_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
 		return
 	}
 	b, _ := os.ReadFile(outPath)
-	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
-	_ = a.sendWS(map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": filepath.Base(outPath), "mimetype": "application/pdf", "target": requester})
+	a.emitViewershipEvent(roomCode, fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
+	_ = a.sendWSForRoom(roomCode, map[string]interface{}{
+		"type":     "pdf",
+		"data":     base64.StdEncoding.EncodeToString(b),
+		"filename": filepath.Base(outPath),
+		"mimetype": "application/pdf",
+		"target":   requester,
+	})
 }
 
 // SelectDirectory triggers the folder selector dialog
@@ -855,6 +951,10 @@ type ExportJob struct {
 }
 
 func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs int) (string, error) {
+	return a.CompileSlidesToPDFForRoom("", jobs, outputPath, sleepMs)
+}
+
+func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outputPath string, sleepMs int) (string, error) {
 	if len(jobs) == 0 {
 		return "", fmt.Errorf("no slides specified for compilation")
 	}
@@ -885,12 +985,16 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 	var pdfPaths []string
 
 	for idx, job := range jobs {
-		wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+		progress := map[string]interface{}{
 			"current": idx + 1,
 			"total":   len(jobs),
 			"slide":   job.SlideName,
 			"phase":   "rendering",
-		})
+		}
+		if roomCode != "" {
+			progress["room"] = roomCode
+		}
+		wailsRuntime.EventsEmit(a.ctx, "compilation_progress", progress)
 
 		renderUrl := job.URL
 		if a.currentDir != "" && a.serverPort != 0 {
@@ -899,10 +1003,19 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 			}
 		} else if a.currentDir == "" {
 			if parsed, err := url.Parse(renderUrl); err == nil {
-				renderUrl = fmt.Sprintf("http://127.0.0.1:8081/proxy%s", parsed.Path)
+				if roomCode != "" {
+					renderUrl = fmt.Sprintf("http://127.0.0.1:8081/proxy/%s%s", roomCode, parsed.Path)
+				} else {
+					renderUrl = fmt.Sprintf("http://127.0.0.1:8081/proxy%s", parsed.Path)
+				}
 			}
 		}
-		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Navigating to URL: %s", renderUrl))
+		
+		if roomCode != "" {
+			a.emitViewershipEvent(roomCode, fmt.Sprintf("Navigating to URL: %s", renderUrl))
+		} else {
+			wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Navigating to URL: %s", renderUrl))
+		}
 
 		// If custom interactive state HTML is provided, write it temporarily
 		var tempFile string
@@ -1288,12 +1401,16 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 	}
 
 	// 2. Merge all page PDFs into a single file using pdfcpu
-	wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+	progressMerge := map[string]interface{}{
 		"current": len(jobs),
 		"total":   len(jobs),
 		"slide":   "All Slides",
 		"phase":   "merging",
-	})
+	}
+	if roomCode != "" {
+		progressMerge["room"] = roomCode
+	}
+	wailsRuntime.EventsEmit(a.ctx, "compilation_progress", progressMerge)
 
 	err = api.MergeCreateFile(pdfPaths, outputPath, false, nil)
 	if err != nil {

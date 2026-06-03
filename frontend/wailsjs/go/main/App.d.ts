@@ -32,6 +32,8 @@ export function CompileSlidesToIDML(arg1:Array<main.ExportJob>,arg2:string,arg3:
 
 export function CompileSlidesToPDF(arg1:Array<main.ExportJob>,arg2:string,arg3:number):Promise<string>;
 
+export function CompileSlidesToPDFForRoom(arg1:string,arg2:Array<main.ExportJob>,arg3:string,arg4:number):Promise<string>;
+
 export function DeleteCompiledPDF(arg1:string):Promise<void>;
 
 export function EndPDFSession(arg1:string):Promise<string>;
@@ -93,5 +95,7 @@ export function StartPDFSession():Promise<string>;
 export function StartWSClient(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function StopWSClient():Promise<void>;
+
+export function StopWSClientForRoom(arg1:string):Promise<void>;
 
 export function SyncWorkspaceToMac():Promise<string>;

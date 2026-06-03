@@ -113,7 +113,7 @@ func (r *WSRoom) notifyOwnerOfClients() {
 	ownerClient, ok := r.srv.clients[r.owner]
 	r.srv.mu.Unlock()
 	if ok {
-		ownerClient.send <- WSMessage{Type: "devices_list", Data: string(b)}
+		ownerClient.send <- WSMessage{Type: "devices_list", Data: string(b), Target: r.id}
 	}
 }
 
@@ -176,6 +176,22 @@ func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	room := s.getOrCreateRoom(roomID)
+	room.mu.Lock()
+	if role == "windows" {
+		for _, c := range room.clients {
+			if c.role == "windows" {
+				room.mu.Unlock()
+				_ = conn.WriteJSON(WSMessage{
+					Type: "error",
+					Data: "This pairing code is already in use by another device.",
+				})
+				_ = conn.Close()
+				return
+			}
+		}
+	}
+	room.mu.Unlock()
+
 	client.room = room
 
 	room.mu.Lock()
@@ -344,20 +360,46 @@ func (s *WSServer) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	parts := strings.SplitN(path, "/", 2)
+	var roomID string
+	var filename string
+	if len(parts) == 2 {
+		roomID = parts[0]
+		filename = parts[1]
+	} else {
+		roomID = ""
+		filename = path
+	}
+
 	// Find the paired Windows client in the room
 	s.mu.Lock()
 	var windowsClient *WSClient
 	var ownerID string
-	for _, room := range s.rooms {
-		for _, client := range room.clients {
-			if client.role == "windows" {
-				windowsClient = client
-				ownerID = room.owner
-				break
+	if roomID != "" {
+		if room, ok := s.rooms[roomID]; ok {
+			for _, client := range room.clients {
+				if client.role == "windows" {
+					windowsClient = client
+					ownerID = room.owner
+					break
+				}
 			}
 		}
-		if windowsClient != nil {
-			break
+	}
+
+	// Fallback to checking any room if not found
+	if windowsClient == nil {
+		for _, room := range s.rooms {
+			for _, client := range room.clients {
+				if client.role == "windows" {
+					windowsClient = client
+					ownerID = room.owner
+					break
+				}
+			}
+			if windowsClient != nil {
+				break
+			}
 		}
 	}
 	s.mu.Unlock()
@@ -385,7 +427,7 @@ func (s *WSServer) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		Type:     "proxy_request",
 		Target:   windowsClient.id,
 		SenderID: ownerID,
-		Filename: path,
+		Filename: filename,
 		Cmd:      reqID,
 	}
 
@@ -506,7 +548,11 @@ func (a *App) SaveRemotePDF(filename string, base64Data string) (string, error) 
 	}
 
 	// Save to the presentation directory's PDF output path
-	outputPath := filepath.Join(a.currentDir, filename)
+	outDir := filepath.Join(a.currentDir, "output")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create output directory: %w", err)
+	}
+	outputPath := filepath.Join(outDir, filename)
 	err = os.WriteFile(outputPath, data, 0644)
 	if err != nil {
 		return "", fmt.Errorf("failed to write compiled PDF file: %w", err)
