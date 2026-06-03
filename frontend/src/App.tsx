@@ -93,13 +93,21 @@ export const App: React.FC = () => {
   // Accumulated Remote jobs for multipage crawl compilation
   const remoteJobsRef = useRef<any[]>([]);
 
-  // Fetch Windows Controller IP for routing
+  // Fetch Windows Controller IP for routing (with subnet prefix matching to target Mac IP)
   useEffect(() => {
     const fetchWindowsIP = async () => {
       try {
         const ips = await GetLocalIPAddresses();
         if (ips && ips.length > 0) {
-          setWindowsIP(ips[0]);
+          let matched = ips[0];
+          if (targetMacIP) {
+            const macPrefix = targetMacIP.split('.').slice(0, 2).join('.'); // e.g., "10.54"
+            const matching = ips.find(ip => ip.startsWith(macPrefix));
+            if (matching) {
+              matched = matching;
+            }
+          }
+          setWindowsIP(matched);
         }
       } catch (err) {
         console.error("Failed to fetch Windows local IP:", err);
@@ -108,7 +116,7 @@ export const App: React.FC = () => {
     if (osPlatform === 'windows') {
       fetchWindowsIP();
     }
-  }, [osPlatform]);
+  }, [osPlatform, targetMacIP]);
 
   // Detect OS platform
   useEffect(() => {
