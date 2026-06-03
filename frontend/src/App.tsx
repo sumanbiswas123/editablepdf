@@ -1910,11 +1910,13 @@ export const App: React.FC = () => {
           
           setTimeout(async () => {
             setIsCompiling(false);
+            setIsSingleSave(false);
             setCompilationProgress(null);
             await refreshPDFList();
           }, 1500);
         } else if (msg.type === 'error') {
           setIsCompiling(false);
+          setIsSingleSave(false);
           setCompilationProgress(null);
           alert(`Mac Compilation failed: ${msg.message}`);
         } else if (msg.type === 'devices_list') {
@@ -1926,6 +1928,7 @@ export const App: React.FC = () => {
       } catch (err: any) {
         console.error("Error processing WS message:", err);
         setIsCompiling(false);
+        setIsSingleSave(false);
         setCompilationProgress(null);
         alert(`Error processing WS message: ${err.message || err}`);
       }
