@@ -113,7 +113,7 @@ export const App: React.FC = () => {
         if (ips && ips.length > 0) {
           let matched = ips[0];
           if (targetMacIP) {
-            const macPrefix = targetMacIP.split('.').slice(0, 2).join('.'); // e.g., "10.54"
+            const macPrefix = targetMacIP.split('.').slice(0, 3).join('.'); // e.g., "192.168.1"
             const matching = ips.find(ip => ip.startsWith(macPrefix));
             if (matching) {
               matched = matching;
