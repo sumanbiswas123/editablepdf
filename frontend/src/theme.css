@@ -380,3 +380,131 @@ body {
   background-color: var(--bg-hover) !important;
   transform: rotate(180deg);
 }
+
+/* Apple Liquid Glass Aesthetics */
+.liquid-glass-card {
+  background: rgba(255, 255, 255, 0.015);
+  backdrop-filter: blur(25px) saturate(200%);
+  -webkit-backdrop-filter: blur(25px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.liquid-glass-card:hover {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(0, 242, 254, 0.25);
+  border-top-color: rgba(0, 242, 254, 0.4);
+  box-shadow: 
+    0 24px 48px rgba(0, 0, 0, 0.45),
+    0 0 24px rgba(0, 242, 254, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transform: translateY(-4px) scale(1.005);
+}
+
+.liquid-add-card {
+  background: rgba(255, 255, 255, 0.005);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.liquid-add-card:hover {
+  background: rgba(0, 242, 254, 0.015);
+  border-style: solid;
+  border-color: rgba(0, 242, 254, 0.45);
+  box-shadow: 
+    0 20px 40px rgba(0, 242, 254, 0.06),
+    0 0 20px rgba(0, 242, 254, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-4px);
+}
+
+.liquid-glass-mesh {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.liquid-glass-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.45;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.liquid-glass-orb-cyan {
+  width: 45%;
+  height: 45%;
+  top: -10%;
+  left: 15%;
+  background: radial-gradient(circle, #00f2fe 0%, rgba(0, 242, 254, 0.1) 70%, transparent 100%);
+}
+
+.liquid-glass-orb-purple {
+  width: 50%;
+  height: 50%;
+  bottom: -15%;
+  right: 10%;
+  background: radial-gradient(circle, #8b5cf6 0%, rgba(139, 92, 246, 0.1) 70%, transparent 100%);
+}
+
+.liquid-glass-orb-pink {
+  width: 35%;
+  height: 35%;
+  top: 40%;
+  right: 20%;
+  background: radial-gradient(circle, #ec4899 0%, rgba(236, 72, 153, 0.05) 70%, transparent 100%);
+}
+
+:root.light .liquid-glass-card {
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+:root.light .liquid-glass-card:hover {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(2, 132, 199, 0.25);
+  border-top-color: rgba(2, 132, 199, 0.4);
+  box-shadow: 
+    0 24px 48px rgba(0, 0, 0, 0.1),
+    0 0 20px rgba(2, 132, 199, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+:root.light .liquid-add-card {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px dashed rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.02);
+}
+
+:root.light .liquid-add-card:hover {
+  background: rgba(2, 132, 199, 0.02);
+  border-color: rgba(2, 132, 199, 0.4);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05);
+}
+
+:root.light .liquid-glass-orb {
+  opacity: 0.15;
+  mix-blend-mode: multiply;
+}
+

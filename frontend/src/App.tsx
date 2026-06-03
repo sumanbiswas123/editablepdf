@@ -77,6 +77,9 @@ interface CompilationProgress {
   detail: string;
 }
 
+let globalDeviceRooms: any[] = [];
+let initialRoomPromise: Promise<any> | null = null;
+
 export const App: React.FC = () => {
   // Theme state
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -100,7 +103,7 @@ export const App: React.FC = () => {
     logs: string[];
     clients: string[];
   }
-  const [deviceRooms, setDeviceRooms] = useState<DeviceRoom[]>([]);
+  const [deviceRooms, setDeviceRooms] = useState<DeviceRoom[]>(() => globalDeviceRooms);
   const [genericModal, setGenericModal] = useState<{
     title: string;
     message: string;
@@ -216,6 +219,11 @@ export const App: React.FC = () => {
     }
   };
 
+  // Sync global device rooms
+  useEffect(() => {
+    globalDeviceRooms = deviceRooms;
+  }, [deviceRooms]);
+
   // Initialize Mac Performer Mode
   useEffect(() => {
     if (appMode === 'capture' && osPlatform === 'darwin') {
@@ -226,15 +234,31 @@ export const App: React.FC = () => {
         try {
           await StartEmbeddedWSServer();
           const ips = await GetLocalIPAddresses();
-          if (!isStopped) {
-            setMacIPAddresses(ips);
-            // Spawn the first device room automatically if none exist yet
-            setDeviceRooms(rooms => {
-              if (rooms.length === 0) {
-                addDeviceRoom();
-              }
-              return rooms;
-            });
+          if (isStopped) return;
+          setMacIPAddresses(ips);
+          
+          // Spawn the first device room automatically if none exist yet
+          if (globalDeviceRooms.length === 0) {
+            if (!initialRoomPromise) {
+              initialRoomPromise = (async () => {
+                const res = await fetch('http://127.0.0.1:8081/create-room');
+                const data = await res.json();
+                const code = data.room;
+                const newRoom = {
+                  code,
+                  status: 'Listening',
+                  logs: [`[${new Date().toLocaleTimeString()}] Room ${code} created. Listening for controllers...`],
+                  clients: []
+                };
+                globalDeviceRooms = [newRoom];
+                await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
+                return newRoom;
+              })();
+            }
+            const room = await initialRoomPromise;
+            if (!isStopped) {
+              setDeviceRooms([room]);
+            }
           }
         } catch (err: any) {
           console.error(err);
@@ -2768,64 +2792,64 @@ export const App: React.FC = () => {
           height: '100vh', 
           display: 'flex', 
           flexDirection: 'column', 
-          background: 'radial-gradient(circle at 10% 20%, rgba(0, 242, 254, 0.08) 0%, transparent 40%), radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 40%), radial-gradient(circle at 50% 50%, rgba(7, 8, 20, 1) 0%, rgba(11, 14, 28, 1) 100%)',
+          background: 'radial-gradient(circle at 50% 50%, #0c0e17 0%, #05060a 100%)',
           padding: '24px',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          position: 'relative'
         }}
       >
+        {/* Apple Liquid Glass Background Mesh */}
+        <div className="liquid-glass-mesh">
+          <div className="liquid-glass-orb liquid-glass-orb-cyan" />
+          <div className="liquid-glass-orb liquid-glass-orb-purple" />
+          <div className="liquid-glass-orb liquid-glass-orb-pink" />
+        </div>
+
         <style dangerouslySetInnerHTML={{__html: `
           @keyframes glowPulse {
-            0% { box-shadow: 0 0 10px rgba(0, 242, 254, 0.1), inset 0 1px 0 0 rgba(255, 255, 255, 0.1); }
-            50% { box-shadow: 0 0 20px rgba(0, 242, 254, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.2); }
-            100% { box-shadow: 0 0 10px rgba(0, 242, 254, 0.1), inset 0 1px 0 0 rgba(255, 255, 255, 0.1); }
+            0% { box-shadow: 0 0 10px rgba(0, 242, 254, 0.15), inset 0 1px 0 0 rgba(255, 255, 255, 0.1); }
+            50% { box-shadow: 0 0 20px rgba(0, 242, 254, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.25); }
+            100% { box-shadow: 0 0 10px rgba(0, 242, 254, 0.15), inset 0 1px 0 0 rgba(255, 255, 255, 0.1); }
           }
-          .liquid-glass-card {
-            background: rgba(255, 255, 255, 0.03) !important;
-            backdrop-filter: blur(25px) saturate(190%) !important;
-            -webkit-backdrop-filter: blur(25px) saturate(190%) !important;
-            border: 1px solid rgba(255, 255, 255, 0.07) !important;
-            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 10px 40px rgba(0, 0, 0, 0.4) !important;
-            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
-          }
-          .liquid-glass-card:hover {
-            background: rgba(255, 255, 255, 0.05) !important;
-            border-color: rgba(0, 242, 254, 0.25) !important;
-            transform: translateY(-5px) scale(1.01);
-            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.15), 0 15px 50px rgba(0, 242, 254, 0.1) !important;
-          }
-          .liquid-add-card {
-            border: 1px dashed rgba(255, 255, 255, 0.15) !important;
-            background: rgba(255, 255, 255, 0.01) !important;
-            backdrop-filter: blur(25px) saturate(190%) !important;
-            -webkit-backdrop-filter: blur(25px) saturate(190%) !important;
-            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
-          }
-          .liquid-add-card:hover {
-            border-color: var(--accent) !important;
-            background: rgba(0, 242, 254, 0.03) !important;
-            transform: translateY(-5px);
-            box-shadow: 0 15px 50px rgba(0, 242, 254, 0.08) !important;
+          .liquid-header {
+            background: rgba(255, 255, 255, 0.02) !important;
+            backdrop-filter: blur(30px) saturate(210%) !important;
+            -webkit-backdrop-filter: blur(30px) saturate(210%) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25) !important;
+            border-radius: 20px;
+            padding: 20px 24px;
+            margin-bottom: 24px;
+            position: relative;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
           }
         `}} />
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexShrink: 0 }}>
+        {/* Dashboard Glass Header */}
+        <div className="liquid-header">
           <div>
-            <h1 style={{ fontSize: '26px', fontWeight: 900, background: 'linear-gradient(135deg, #ffffff 30%, rgba(255,255,255,0.7) 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.7px' }}>
-              🖥️ Mac Performer Viewership Dashboard
+            <h1 style={{ fontSize: '24px', fontWeight: 900, background: 'linear-gradient(135deg, #ffffff 40%, rgba(255,255,255,0.7) 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.7px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ textShadow: '0 0 20px rgba(255,255,255,0.3)' }}>🖥️</span> Mac Performer Dashboard
             </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-3)', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Target Mac Network IPs:</span>
+            <p style={{ fontSize: '13px', color: 'var(--text-3)', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Local Network IPs:</span>
               {macIPAddresses.length > 0 ? (
                 macIPAddresses.map((ip, i) => (
                   <span key={ip} style={{ 
                     fontFamily: 'var(--font-mono)', 
                     color: 'var(--accent)', 
                     fontWeight: 700, 
-                    backgroundColor: 'rgba(0, 242, 254, 0.08)',
+                    backgroundColor: 'rgba(0, 242, 254, 0.05)',
                     border: '1px solid rgba(0, 242, 254, 0.15)',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    fontSize: '11.5px'
+                    padding: '3px 10px',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    boxShadow: '0 0 10px rgba(0, 242, 254, 0.05)',
+                    letterSpacing: '0.2px'
                   }}>
                     {ip}
                   </span>
@@ -2841,28 +2865,31 @@ export const App: React.FC = () => {
               setAppMode('select');
             }}
             style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              backdropFilter: 'blur(10px)',
+              background: 'rgba(255, 255, 255, 0.04)',
+              backdropFilter: 'blur(16px)',
               border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderTop: '1px solid rgba(255, 255, 255, 0.18)',
               color: '#ffffff',
-              padding: '8px 18px',
+              padding: '10px 20px',
               borderRadius: '12px',
               fontSize: '12px',
               fontWeight: 700,
               cursor: 'pointer',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1)',
-              transition: 'all 0.2s'
+              boxShadow: '0 4px 15px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.05)',
+              transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-              e.currentTarget.style.borderColor = 'var(--accent)';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+              e.currentTarget.style.borderColor = 'rgba(0, 242, 254, 0.3)';
+              e.currentTarget.style.transform = 'scale(1.02)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
               e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+              e.currentTarget.style.transform = 'scale(1)';
             }}
           >
-            ← Reset Role Mode
+            ← Reset Mode
           </button>
         </div>
 
@@ -2870,10 +2897,12 @@ export const App: React.FC = () => {
         <div style={{
           flex: 1,
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
-          gap: '24px',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))',
+          gap: '28px',
           overflowY: 'auto',
-          paddingBottom: '24px'
+          paddingBottom: '24px',
+          position: 'relative',
+          zIndex: 5
         }}>
           {deviceRooms.map((room) => (
             <div 
@@ -2883,78 +2912,82 @@ export const App: React.FC = () => {
                 borderRadius: '24px',
                 display: 'flex',
                 flexDirection: 'column',
-                height: '420px',
+                height: '440px',
                 overflow: 'hidden',
                 position: 'relative'
               }}
             >
               {/* Card Header */}
               <div style={{
-                padding: '16px 20px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                padding: '18px 24px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                backgroundColor: 'rgba(255, 255, 255, 0.015)'
+                backgroundColor: 'rgba(255, 255, 255, 0.008)'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{
-                    width: '7px',
-                    height: '7px',
+                    width: '8px',
+                    height: '8px',
                     borderRadius: '50%',
-                    backgroundColor: room.clients.length > 0 ? 'var(--success)' : 'rgba(255,255,255,0.3)',
-                    boxShadow: room.clients.length > 0 ? '0 0 10px var(--success)' : 'none'
+                    backgroundColor: room.clients.length > 0 ? 'var(--success)' : 'rgba(255,255,255,0.2)',
+                    boxShadow: room.clients.length > 0 ? '0 0 12px var(--success), 0 0 4px var(--success)' : 'none',
+                    transition: 'all 0.3s ease'
                   }} />
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: room.clients.length > 0 ? '#ffffff' : 'var(--text-3)', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
-                    {room.clients.length > 0 ? `${room.clients.length} Controller Paired` : 'Waiting for controller'}
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: room.clients.length > 0 ? '#ffffff' : 'var(--text-3)', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                    {room.clients.length > 0 ? `${room.clients.length} Active Connection` : 'Awaiting Pair'}
                   </span>
                 </div>
                 <button
                   onClick={() => removeDeviceRoom(room.code)}
                   style={{
-                    background: 'rgba(244, 63, 94, 0.06)',
-                    border: '1px solid rgba(244, 63, 94, 0.2)',
-                    color: '#f43f5e',
-                    fontSize: '10.5px',
-                    fontWeight: 800,
+                    background: 'rgba(244, 63, 94, 0.04)',
+                    border: '1px solid rgba(244, 63, 94, 0.15)',
+                    color: '#fb7185',
+                    fontSize: '11px',
+                    fontWeight: 700,
                     cursor: 'pointer',
-                    padding: '4px 10px',
-                    borderRadius: '8px',
-                    transition: 'all 0.2s'
+                    padding: '6px 14px',
+                    borderRadius: '10px',
+                    transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)'
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(244, 63, 94, 0.15)';
-                    e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.4)';
+                    e.currentTarget.style.background = 'rgba(244, 63, 94, 0.12)';
+                    e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.35)';
+                    e.currentTarget.style.color = '#ef4444';
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(244, 63, 94, 0.06)';
-                    e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.2)';
+                    e.currentTarget.style.background = 'rgba(244, 63, 94, 0.04)';
+                    e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.15)';
+                    e.currentTarget.style.color = '#fb7185';
                   }}
                 >
-                  Disconnect
+                  Close Room
                 </button>
               </div>
 
               {/* Card Body - Pairing Code */}
               <div style={{
-                padding: '24px 20px',
+                padding: '28px 24px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: '6px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-                backgroundColor: 'rgba(0, 0, 0, 0.15)'
+                gap: '8px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                background: 'linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.25))'
               }}>
-                <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 800, letterSpacing: '1.5px', textTransform: 'uppercase' }}>
-                  Pairing Room Code
+                <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 800, letterSpacing: '2px', textTransform: 'uppercase' }}>
+                  Pairing Passcode
                 </span>
                 <span style={{
-                  fontSize: '36px',
+                  fontSize: '40px',
                   fontWeight: 900,
                   color: '#ffffff',
                   fontFamily: 'var(--font-mono)',
-                  letterSpacing: '5px',
-                  textShadow: '0 0 20px rgba(0, 242, 254, 0.4)'
+                  letterSpacing: '6px',
+                  textShadow: '0 0 30px rgba(0, 242, 254, 0.35), 0 0 10px rgba(0, 242, 254, 0.15)'
                 }}>
                   {room.code}
                 </span>
@@ -2968,38 +3001,42 @@ export const App: React.FC = () => {
                 overflow: 'hidden'
               }}>
                 <div style={{
-                  padding: '8px 16px',
-                  fontSize: '9.5px',
+                  padding: '10px 20px',
+                  fontSize: '10px',
                   fontWeight: 800,
                   textTransform: 'uppercase',
                   color: 'var(--text-3)',
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-                  backgroundColor: 'rgba(255,255,255,0.01)'
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                  backgroundColor: 'rgba(255,255,255,0.005)',
+                  letterSpacing: '0.5px'
                 }}>
-                  Activity Log
+                  Live Output Feed
                 </div>
                 <div style={{
                   flex: 1,
-                  padding: '14px 18px',
+                  padding: '16px 20px',
                   fontFamily: 'var(--font-mono)',
-                  fontSize: '10px',
-                  color: 'rgba(255, 255, 255, 0.8)',
+                  fontSize: '10.5px',
+                  color: 'rgba(255, 255, 255, 0.85)',
                   overflowY: 'auto',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '6px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.25)'
+                  gap: '8px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                  boxShadow: 'inset 0 10px 20px rgba(0,0,0,0.2)'
                 }}>
                   {room.logs.map((log, i) => (
                     <div key={i} style={{
-                      lineHeight: '1.45',
-                      color: log.includes('[ERROR]') ? '#f43f5e' : log.includes('Success') || log.includes('Finished') ? 'var(--success)' : 'rgba(255, 255, 255, 0.75)'
+                      lineHeight: '1.5',
+                      color: log.includes('[ERROR]') ? '#fb7185' : log.includes('Success') || log.includes('Finished') ? 'var(--success)' : 'rgba(255, 255, 255, 0.75)',
+                      borderLeft: log.includes('[ERROR]') ? '2px solid #f43f5e' : log.includes('Success') || log.includes('Finished') ? '2px solid var(--success)' : 'none',
+                      paddingLeft: log.includes('[ERROR]') || log.includes('Success') || log.includes('Finished') ? '6px' : '0px'
                     }}>
                       {log}
                     </div>
                   ))}
                   {room.logs.length === 0 && (
-                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Console logs will print here...</div>
+                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Logs will stream here in real time...</div>
                   )}
                 </div>
               </div>
@@ -3016,7 +3053,7 @@ export const App: React.FC = () => {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              height: '420px',
+              height: '440px',
               cursor: 'pointer',
               gap: '16px',
               textAlign: 'center',
@@ -3024,18 +3061,18 @@ export const App: React.FC = () => {
             }}
           >
             <div style={{
-              fontSize: '48px',
+              fontSize: '56px',
               background: 'linear-gradient(135deg, var(--accent) 0%, var(--blue) 100%)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
-              fontWeight: 200,
-              textShadow: '0 0 20px rgba(0, 242, 254, 0.3)'
+              fontWeight: 300,
+              textShadow: '0 0 25px rgba(0, 242, 254, 0.3)'
             }}>
               +
             </div>
             <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#ffffff' }}>Add Device Pairing Room</h3>
-              <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.5)', marginTop: '8px', maxWidth: '240px', lineHeight: '1.5' }}>
+              <h3 style={{ fontSize: '17px', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.3px' }}>Create Pairing Room</h3>
+              <p style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.45)', marginTop: '10px', maxWidth: '240px', lineHeight: '1.5' }}>
                 Spawns a new pairing room code to connect another Windows Controller concurrently.
               </p>
             </div>
