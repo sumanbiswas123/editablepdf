@@ -40,6 +40,18 @@ import {
 import { EventsOn } from '../wailsjs/runtime/runtime';
 import { StudioPage } from './components/StudioPage';
 
+// Helper to safely bind Wails events (guards against undefined runtime in standard web browsers)
+const safeEventsOn = (eventName: string, callback: (...args: any[]) => void): (() => void) => {
+  if (typeof window !== 'undefined' && (window as any).runtime) {
+    try {
+      return EventsOn(eventName, callback);
+    } catch (e) {
+      console.warn(`EventsOn failed for ${eventName}:`, e);
+    }
+  }
+  return () => {};
+};
+
 
 interface Slide {
   name: string;
@@ -164,11 +176,11 @@ export const App: React.FC = () => {
       initMacPerformer();
 
       // Listen for Go wails events
-      const destroyWSEvent = EventsOn('viewership_event', (msg: string) => {
+      const destroyWSEvent = safeEventsOn('viewership_event', (msg: string) => {
         setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
       });
 
-      const destroyDevicesEvent = EventsOn('devices_list_updated', (data: string) => {
+      const destroyDevicesEvent = safeEventsOn('devices_list_updated', (data: string) => {
         try {
           const list = JSON.parse(data);
           setConnectedClients(list || []);
@@ -296,7 +308,7 @@ export const App: React.FC = () => {
     window.addEventListener('message', handleMessage);
 
     // Bind Wails progress events
-    const destroyProgressEvent = EventsOn('compilation_progress', (data: any) => {
+    const destroyProgressEvent = safeEventsOn('compilation_progress', (data: any) => {
       setCompilationProgress({
         phase: data.phase,
         current: data.current,
@@ -1904,29 +1916,15 @@ export const App: React.FC = () => {
           detail: 'Preparing slide state resources for Mac Performer...'
         });
 
-        let resolvedUrl = activeSlide.url;
-        if (capturedHtml) {
-          resolvedUrl = await CaptureCustomStateHTML(activeSlide.folderName, capturedHtml);
-        }
-
-        if (windowsIP) {
-          resolvedUrl = resolvedUrl.replace('127.0.0.1', windowsIP).replace('localhost', windowsIP);
-        }
-
         const job = {
           slideName: activeSlide.name,
           folderName: activeSlide.folderName,
-          url: resolvedUrl,
-          customHtml: '',
+          url: activeSlide.url,
+          customHtml: capturedHtml,
           tempFilename: ''
         };
 
-        const tempFile = resolvedUrl.split('/').pop() || '';
-        if (tempFile.startsWith('temp_state_')) {
-          pendingCleanupsRef.current = [{ folder: activeSlide.folderName, file: tempFile }];
-        } else {
-          pendingCleanupsRef.current = [];
-        }
+        pendingCleanupsRef.current = [];
 
         remoteFilenameRef.current = `${activeSlide.name}.pdf`;
         controllerWS?.send(JSON.stringify({
@@ -2053,29 +2051,17 @@ export const App: React.FC = () => {
               });
 
               const resolvedJobs = [];
-              const cleanups = [];
               for (let i = 0; i < remoteJobsRef.current.length; i++) {
                 const j = remoteJobsRef.current[i];
-                let resolvedUrl = j.url;
-                if (j.customHtml) {
-                  resolvedUrl = await CaptureCustomStateHTML(j.folderName, j.customHtml);
-                }
-                if (windowsIP) {
-                  resolvedUrl = resolvedUrl.replace('127.0.0.1', windowsIP).replace('localhost', windowsIP);
-                }
-                const filename = resolvedUrl.split('/').pop() || '';
-                if (filename.startsWith('temp_state_')) {
-                  cleanups.push({ folder: j.folderName, file: filename });
-                }
                 resolvedJobs.push({
                   ...j,
-                  url: resolvedUrl,
-                  customHtml: '',
+                  url: j.url,
+                  customHtml: j.customHtml,
                   tempFilename: ''
                 });
               }
 
-              pendingCleanupsRef.current = cleanups;
+              pendingCleanupsRef.current = [];
 
               setCompilationProgress({
                 phase: 'rendering',
@@ -2214,29 +2200,17 @@ export const App: React.FC = () => {
         });
 
         const resolvedJobs = [];
-        const cleanups = [];
         for (let i = 0; i < remoteJobsRef.current.length; i++) {
           const j = remoteJobsRef.current[i];
-          let resolvedUrl = j.url;
-          if (j.customHtml) {
-            resolvedUrl = await CaptureCustomStateHTML(j.folderName, j.customHtml);
-          }
-          if (windowsIP) {
-            resolvedUrl = resolvedUrl.replace('127.0.0.1', windowsIP).replace('localhost', windowsIP);
-          }
-          const filename = resolvedUrl.split('/').pop() || '';
-          if (filename.startsWith('temp_state_')) {
-            cleanups.push({ folder: j.folderName, file: filename });
-          }
           resolvedJobs.push({
             ...j,
-            url: resolvedUrl,
-            customHtml: '',
+            url: j.url,
+            customHtml: j.customHtml,
             tempFilename: ''
           });
         }
 
-        pendingCleanupsRef.current = cleanups;
+        pendingCleanupsRef.current = [];
 
         setCompilationProgress({
           phase: 'merging',
