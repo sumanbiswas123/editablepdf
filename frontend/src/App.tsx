@@ -1872,13 +1872,18 @@ export const App: React.FC = () => {
     ws.onmessage = async (event) => {
       try {
         const msg = JSON.parse(event.data);
+        setCompilationProgress(prev => prev ? {
+          ...prev,
+          detail: `Received WS packet of type: ${msg.type || 'unknown'}`
+        } : null);
+
         if (msg.type === 'pdf') {
           setCompilationProgress({
             phase: 'merging',
             current: 90,
             total: 100,
             slide: msg.filename,
-            detail: 'Downloading compiled Safari ePDF from Mac...'
+            detail: 'Saving compiled ePDF output to local disk...'
           });
 
           const filename = remoteFilenameRef.current || msg.filename;
