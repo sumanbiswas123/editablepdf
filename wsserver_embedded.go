@@ -347,10 +347,12 @@ func (s *WSServer) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// Find the paired Windows client in the room
 	s.mu.Lock()
 	var windowsClient *WSClient
+	var ownerID string
 	for _, room := range s.rooms {
 		for _, client := range room.clients {
 			if client.role == "windows" {
 				windowsClient = client
+				ownerID = room.owner
 				break
 			}
 		}
@@ -382,6 +384,7 @@ func (s *WSServer) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	msg := WSMessage{
 		Type:     "proxy_request",
 		Target:   windowsClient.id,
+		SenderID: ownerID,
 		Filename: path,
 		Cmd:      reqID,
 	}
