@@ -21,14 +21,15 @@ import (
 
 // Embedded WS Server definitions
 type WSMessage struct {
-	Type     string `json:"type"`
-	SenderID string `json:"senderId,omitempty"`
-	Role     string `json:"role,omitempty"`
-	Data     string `json:"data,omitempty"` // base64 payload (image/file)
-	Filename string `json:"filename,omitempty"`
-	Mimetype string `json:"mimetype,omitempty"`
-	Target   string `json:"target,omitempty"` // target room id/client id
-	Cmd      string `json:"cmd,omitempty"`
+	Type     string      `json:"type"`
+	SenderID string      `json:"senderId,omitempty"`
+	Role     string      `json:"role,omitempty"`
+	Data     string      `json:"data,omitempty"` // base64 payload (image/file)
+	Filename string      `json:"filename,omitempty"`
+	Mimetype string      `json:"mimetype,omitempty"`
+	Target   string      `json:"target,omitempty"` // target room id/client id
+	Cmd      string      `json:"cmd,omitempty"`
+	Jobs     interface{} `json:"jobs,omitempty"`
 }
 
 type WSClient struct {
