@@ -181,3 +181,7 @@ export function StartWSClient(arg1, arg2, arg3) {
 export function StopWSClient() {
   return window['go']['main']['App']['StopWSClient']();
 }
+
+export function SyncWorkspaceToMac() {
+  return window['go']['main']['App']['SyncWorkspaceToMac']();
+}

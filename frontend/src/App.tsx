@@ -34,7 +34,8 @@ import {
   StartWSClient,
   StopWSClient,
   CaptureCustomStateHTML,
-  CleanUpTempHTML
+  CleanUpTempHTML,
+  SyncWorkspaceToMac
 } from '../wailsjs/go/main/App';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
@@ -328,6 +329,42 @@ export const App: React.FC = () => {
   }, [slides, currentSlideIndex]);
 
 
+
+  const [workspaceSynced, setWorkspaceSynced] = useState(false);
+
+  const ensureWorkspaceSynced = async (forced = false) => {
+    if (!rootDirectory) {
+      return;
+    }
+    if (appMode !== 'capture' || wsConnectionState !== 'connected' || !controllerWS) {
+      return;
+    }
+    if (workspaceSynced && !forced) {
+      return;
+    }
+    
+    setCompilationProgress({
+      phase: 'merging',
+      current: 5,
+      total: 100,
+      slide: 'Syncing...',
+      detail: 'Synchronizing presentation assets to Mac Performer over WebSocket...'
+    });
+
+    try {
+      const base64Zip = await SyncWorkspaceToMac();
+      controllerWS.send(JSON.stringify({
+        type: 'sync_workspace',
+        data: base64Zip
+      }));
+      setWorkspaceSynced(true);
+      // Wait a moment for unzip and local HTTP server initialization on Mac
+      await new Promise(r => setTimeout(r, 1500));
+    } catch (err: any) {
+      console.error("Workspace sync failed:", err);
+      alert(`Workspace sync failed: ${err.message || err}`);
+    }
+  };
 
   // Load Single presentation Workspace
   const onDirectoryLoaded = async (dirPath: string) => {

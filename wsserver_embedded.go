@@ -262,7 +262,7 @@ func (c *WSClient) readPump() {
 					ownerClient.send <- msg
 				}
 			}
-		case "pdf":
+		case "pdf", "proxy_request", "proxy_response", "sync_workspace":
 			if msg.Target != "" && c.srv != nil {
 				c.srv.mu.Lock()
 				targetClient := c.srv.clients[msg.Target]
@@ -322,6 +322,95 @@ func (c *WSClient) writePump() {
 	}
 }
 
+type ProxyResponse struct {
+	Data       string `json:"data"`
+	Mimetype   string `json:"mimetype"`
+	StatusCode int    `json:"statusCode"`
+}
+
+var (
+	proxyRequests   = make(map[string]chan ProxyResponse)
+	proxyRequestsMu sync.Mutex
+)
+
+func (s *WSServer) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/proxy/")
+	if path == "" {
+		http.Error(w, "empty path", http.StatusBadRequest)
+		return
+	}
+
+	// Find the paired Windows client in the room
+	s.mu.Lock()
+	var windowsClient *WSClient
+	for _, room := range s.rooms {
+		for _, client := range room.clients {
+			if client.role == "windows" {
+				windowsClient = client
+				break
+			}
+		}
+		if windowsClient != nil {
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if windowsClient == nil {
+		http.Error(w, "no controller connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	reqID := uuid.New().String()
+	ch := make(chan ProxyResponse, 1)
+
+	proxyRequestsMu.Lock()
+	proxyRequests[reqID] = ch
+	proxyRequestsMu.Unlock()
+
+	defer func() {
+		proxyRequestsMu.Lock()
+		delete(proxyRequests, reqID)
+		proxyRequestsMu.Unlock()
+	}()
+
+	// Send request to Windows Controller
+	msg := WSMessage{
+		Type:     "proxy_request",
+		Target:   windowsClient.id,
+		Filename: path,
+		Cmd:      reqID,
+	}
+
+	select {
+	case windowsClient.send <- msg:
+	default:
+		http.Error(w, "failed to send request to controller", http.StatusInternalServerError)
+		return
+	}
+
+	// Wait for response from Windows Controller
+	select {
+	case resp := <-ch:
+		if resp.StatusCode != 0 && resp.StatusCode != http.StatusOK {
+			http.Error(w, fmt.Sprintf("proxy error: status %d", resp.StatusCode), resp.StatusCode)
+			return
+		}
+		b, err := base64.StdEncoding.DecodeString(resp.Data)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if resp.Mimetype != "" {
+			w.Header().Set("Content-Type", resp.Mimetype)
+		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Write(b)
+	case <-time.After(8 * time.Second):
+		http.Error(w, "timeout waiting for controller response", http.StatusGatewayTimeout)
+	}
+}
+
 // Bindable WS actions in App
 var (
 	embeddedServer   *WSServer
@@ -341,6 +430,7 @@ func (a *App) StartEmbeddedWSServer() string {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/create-room", embeddedServer.handleCreateRoom)
 	mux.HandleFunc("/ws", embeddedServer.handleWS)
+	mux.HandleFunc("/proxy/", embeddedServer.handleProxyRequest)
 
 	go func() {
 		log.Println("Embedded WebSocket Server running on :8081")

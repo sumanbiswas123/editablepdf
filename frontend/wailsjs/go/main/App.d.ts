@@ -91,3 +91,5 @@ export function StartPDFSession():Promise<string>;
 export function StartWSClient(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function StopWSClient():Promise<void>;
+
+export function SyncWorkspaceToMac():Promise<string>;

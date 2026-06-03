@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -139,6 +141,33 @@ func (a *App) wsReadLoop(mode string) {
 			requester, _ := msg["senderId"].(string)
 			if ok && requester != "" {
 				go a.handleRenderRequest(jobsRaw, requester)
+			}
+		case "sync_workspace":
+			dataStr, _ := msg["data"].(string)
+			go a.handleSyncWorkspace(dataStr)
+		case "proxy_request":
+			path, _ := msg["filename"].(string)
+			reqID, _ := msg["cmd"].(string)
+			requester, _ := msg["senderId"].(string)
+			if path != "" && reqID != "" && requester != "" {
+				go a.handleProxyRequest(path, reqID, requester)
+			}
+		case "proxy_response":
+			reqID, _ := msg["cmd"].(string)
+			dataStr, _ := msg["data"].(string)
+			mime, _ := msg["mimetype"].(string)
+			statusVal, _ := msg["statusCode"].(float64)
+			if reqID != "" {
+				proxyRequestsMu.Lock()
+				ch, ok := proxyRequests[reqID]
+				proxyRequestsMu.Unlock()
+				if ok {
+					ch <- ProxyResponse{
+						Data:       dataStr,
+						Mimetype:   mime,
+						StatusCode: int(statusVal),
+					}
+				}
 			}
 		case "devices_list":
 			data, _ := msg["data"].(string)
@@ -870,6 +899,15 @@ func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs in
 		})
 
 		renderUrl := job.URL
+		if a.currentDir != "" && a.serverPort != 0 {
+			if parsed, err := url.Parse(renderUrl); err == nil {
+				renderUrl = fmt.Sprintf("http://127.0.0.1:%d%s", a.serverPort, parsed.Path)
+			}
+		} else if a.currentDir == "" {
+			if parsed, err := url.Parse(renderUrl); err == nil {
+				renderUrl = fmt.Sprintf("http://127.0.0.1:8081/proxy%s", parsed.Path)
+			}
+		}
 		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Navigating to URL: %s", renderUrl))
 
 		// If custom interactive state HTML is provided, write it temporarily
@@ -1526,5 +1564,247 @@ func (a *App) GetAssetBase64(name string) string {
 	}
 
 	return ""
+}
+
+// SyncWorkspaceToMac zip-compresses the current project workspace directory and returns it as a Base64 string.
+func (a *App) SyncWorkspaceToMac() (string, error) {
+	if a.currentDir == "" {
+		return "", fmt.Errorf("no workspace directory selected")
+	}
+
+	tmpFile, err := os.CreateTemp("", "workspace_sync_*.zip")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	archive := zip.NewWriter(tmpFile)
+	err = filepath.Walk(a.currentDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip output, node_modules, and git directories to keep payload minimal
+		if info.IsDir() {
+			name := info.Name()
+			if name == "output" || name == ".git" || name == "node_modules" || name == ".wails" {
+				return filepath.SkipDir
+			}
+		}
+		
+		// Skip temporary or PDF outputs
+		lowerPath := strings.ToLower(path)
+		if strings.HasSuffix(lowerPath, ".zip") || strings.HasSuffix(lowerPath, ".pdf") {
+			return nil
+		}
+
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(a.currentDir, path)
+		if err != nil {
+			return err
+		}
+		header.Name = filepath.ToSlash(relPath)
+
+		if info.IsDir() {
+			header.Name += "/"
+		} else {
+			header.Method = zip.Deflate
+		}
+
+		writer, err := archive.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		_, err = io.Copy(writer, file)
+		return err
+	})
+
+	if err != nil {
+		archive.Close()
+		return "", err
+	}
+	archive.Close()
+
+	zipBytes, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		return "", err
+	}
+
+	return base64.StdEncoding.EncodeToString(zipBytes), nil
+}
+
+// UnzipBytes decodes base64 zip payload and extracts it to the destination directory.
+func UnzipBytes(zipBase64 string, destDir string) error {
+	zipBytes, err := base64.StdEncoding.DecodeString(zipBase64)
+	if err != nil {
+		return err
+	}
+
+	tmpFile, err := os.CreateTemp("", "mac_received_*.zip")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.Write(zipBytes); err != nil {
+		return err
+	}
+
+	r, err := zip.OpenReader(tmpFile.Name())
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		fpath := filepath.Join(destDir, f.Name)
+		// Protect against Zip Slip vulnerabilities
+		if !strings.HasPrefix(fpath, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			continue
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, os.ModePerm)
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+			return err
+		}
+
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// handleSyncWorkspace processes the synced directory payload on macOS Performer.
+func (a *App) handleSyncWorkspace(zipBase64 string) {
+	wailsRuntime.EventsEmit(a.ctx, "viewership_event", "Syncing presentation workspace from Windows...")
+	tempDir, err := os.MkdirTemp("", "wails_mac_workspace_")
+	if err != nil {
+		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Workspace sync error: failed to create temp directory: %s", err.Error()))
+		return
+	}
+
+	err = UnzipBytes(zipBase64, tempDir)
+	if err != nil {
+		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Workspace sync error: failed to extract files: %s", err.Error()))
+		return
+	}
+
+	wailsRuntime.EventsEmit(a.ctx, "viewership_event", "Workspace synced. Starting local Performer HTTP server...")
+	port, err := a.startLocalServer(tempDir)
+	if err != nil {
+		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Workspace sync error: failed to start local HTTP server: %s", err.Error()))
+		return
+	}
+
+	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Performer HTTP server active locally on port %d", port))
+}
+
+// handleProxyRequest reads local files and sends them to Mac Performer over WebSocket.
+func (a *App) handleProxyRequest(path string, reqID string, requester string) {
+	if a.currentDir == "" {
+		_ = a.sendWS(map[string]interface{}{
+			"type":       "proxy_response",
+			"target":     requester,
+			"cmd":        reqID,
+			"statusCode": http.StatusServiceUnavailable,
+		})
+		return
+	}
+
+	fullPath := filepath.Join(a.currentDir, path)
+	cleanedPath := filepath.Clean(fullPath)
+	if !strings.HasPrefix(cleanedPath, filepath.Clean(a.currentDir)) {
+		_ = a.sendWS(map[string]interface{}{
+			"type":       "proxy_response",
+			"target":     requester,
+			"cmd":        reqID,
+			"statusCode": http.StatusForbidden,
+		})
+		return
+	}
+
+	data, err := os.ReadFile(cleanedPath)
+	if err != nil {
+		_ = a.sendWS(map[string]interface{}{
+			"type":       "proxy_response",
+			"target":     requester,
+			"cmd":        reqID,
+			"statusCode": http.StatusNotFound,
+		})
+		return
+	}
+
+	var mime string
+	ext := strings.ToLower(filepath.Ext(cleanedPath))
+	switch ext {
+	case ".html", ".htm":
+		mime = "text/html"
+	case ".css":
+		mime = "text/css"
+	case ".js":
+		mime = "application/javascript"
+	case ".png":
+		mime = "image/png"
+	case ".jpg", ".jpeg":
+		mime = "image/jpeg"
+	case ".gif":
+		mime = "image/gif"
+	case ".svg":
+		mime = "image/svg+xml"
+	case ".json":
+		mime = "application/json"
+	case ".woff":
+		mime = "font/woff"
+	case ".woff2":
+		mime = "font/woff2"
+	case ".ttf":
+		mime = "font/ttf"
+	default:
+		mime = "application/octet-stream"
+	}
+
+	_ = a.sendWS(map[string]interface{}{
+		"type":       "proxy_response",
+		"target":     requester,
+		"cmd":        reqID,
+		"data":       base64.StdEncoding.EncodeToString(data),
+		"mimetype":   mime,
+		"statusCode": http.StatusOK,
+	})
 }
 
