@@ -177,6 +177,7 @@ func (a *App) handleCaptureCommand(targetRoom string) {
 }
 
 func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
+	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Received render request from client %s", requester))
 	// jobsRaw expected to be []interface{} map-compatible
 	rawSlice, ok := jobsRaw.([]interface{})
 	if !ok {
@@ -185,16 +186,20 @@ func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
 			var parsed []ExportJob
 			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
 				jobs := parsed
+				wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Rendering %d slides locally...", len(jobs)))
 				outPath, err := a.CompileSlidesToPDF(jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
 				if err != nil {
+					wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Render error: %s", err.Error()))
 					_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
 					return
 				}
 				b, _ := os.ReadFile(outPath)
+				wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
 				_ = a.sendWS(map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": filepath.Base(outPath), "mimetype": "application/pdf", "target": requester})
 				return
 			}
 		}
+		wailsRuntime.EventsEmit(a.ctx, "viewership_event", "Render error: invalid jobs payload")
 		_ = a.sendWS(map[string]interface{}{"type": "error", "message": "invalid jobs", "target": requester})
 		return
 	}
@@ -209,12 +214,15 @@ func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
 			jobs = append(jobs, job)
 		}
 	}
+	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Rendering %d slides locally...", len(jobs)))
 	outPath, err := a.CompileSlidesToPDF(jobs, filepath.Join(os.TempDir(), fmt.Sprintf("render_%d.pdf", time.Now().Unix())), 200)
 	if err != nil {
+		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Render error: %s", err.Error()))
 		_ = a.sendWS(map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
 		return
 	}
 	b, _ := os.ReadFile(outPath)
+	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
 	_ = a.sendWS(map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": filepath.Base(outPath), "mimetype": "application/pdf", "target": requester})
 }
 

@@ -94,8 +94,16 @@ export function GetAssetBase64(arg1) {
   return window['go']['main']['App']['GetAssetBase64'](arg1);
 }
 
+export function GetLocalIPAddresses() {
+  return window['go']['main']['App']['GetLocalIPAddresses']();
+}
+
 export function GetOutputDir() {
   return window['go']['main']['App']['GetOutputDir']();
+}
+
+export function GetPlatform() {
+  return window['go']['main']['App']['GetPlatform']();
 }
 
 export function IsSingleSlidePDF(arg1) {
@@ -120,6 +128,10 @@ export function RebuildCombinedPDF(arg1, arg2, arg3) {
 
 export function RenameCombinedPDF(arg1, arg2) {
   return window['go']['main']['App']['RenameCombinedPDF'](arg1, arg2);
+}
+
+export function SaveRemotePDF(arg1, arg2) {
+  return window['go']['main']['App']['SaveRemotePDF'](arg1, arg2);
 }
 
 export function ScanActiveSlide(arg1) {
@@ -152,6 +164,10 @@ export function SelectScreenshotSavePath(arg1) {
 
 export function SplitCombinedPDFToPages(arg1) {
   return window['go']['main']['App']['SplitCombinedPDFToPages'](arg1);
+}
+
+export function StartEmbeddedWSServer() {
+  return window['go']['main']['App']['StartEmbeddedWSServer']();
 }
 
 export function StartPDFSession() {

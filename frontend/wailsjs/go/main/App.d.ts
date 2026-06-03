@@ -48,7 +48,11 @@ export function GenerateNextSequentialPDFPath():Promise<string>;
 
 export function GetAssetBase64(arg1:string):Promise<string>;
 
+export function GetLocalIPAddresses():Promise<Array<string>>;
+
 export function GetOutputDir():Promise<string>;
+
+export function GetPlatform():Promise<string>;
 
 export function IsSingleSlidePDF(arg1:string):Promise<boolean>;
 
@@ -61,6 +65,8 @@ export function OpenDirectory():Promise<void>;
 export function RebuildCombinedPDF(arg1:string,arg2:Array<string>,arg3:Array<string>):Promise<string>;
 
 export function RenameCombinedPDF(arg1:string,arg2:string):Promise<void>;
+
+export function SaveRemotePDF(arg1:string,arg2:string):Promise<string>;
 
 export function ScanActiveSlide(arg1:string):Promise<Array<string>>;
 
@@ -77,6 +83,8 @@ export function SelectSavePath(arg1:string):Promise<string>;
 export function SelectScreenshotSavePath(arg1:string):Promise<string>;
 
 export function SplitCombinedPDFToPages(arg1:string):Promise<string>;
+
+export function StartEmbeddedWSServer():Promise<string>;
 
 export function StartPDFSession():Promise<string>;
 

@@ -26,7 +26,13 @@ import {
   CombineCustomPDFs,
   SelectPDFFile,
   SplitCombinedPDFToPages,
-  RebuildCombinedPDF
+  RebuildCombinedPDF,
+  StartEmbeddedWSServer,
+  GetPlatform,
+  GetLocalIPAddresses,
+  SaveRemotePDF,
+  StartWSClient,
+  StopWSClient
 } from '../wailsjs/go/main/App';
 
 import { EventsOn } from '../wailsjs/runtime/runtime';
@@ -62,6 +68,87 @@ export const App: React.FC = () => {
     return 'dark';
   });
 
+  // ─── Builder vs Capture Mode states ───
+  const [appMode, setAppMode] = useState<'select' | 'builder' | 'capture'>('select');
+  const [osPlatform, setOsPlatform] = useState<'darwin' | 'windows' | ''>('');
+  
+  // Mac Performer details
+  const [macPairingCode, setMacPairingCode] = useState('');
+  const [macIPAddresses, setMacIPAddresses] = useState<string[]>([]);
+  const [macConnectionStatus, setMacConnectionStatus] = useState('Idle');
+  
+  // Windows Controller details
+  const [targetMacIP, setTargetMacIP] = useState(() => localStorage.getItem('capture-mac-ip') || '');
+  const [targetMacCode, setTargetMacCode] = useState(() => localStorage.getItem('capture-mac-code') || '');
+  const [controllerWS, setControllerWS] = useState<WebSocket | null>(null);
+  const [wsConnectionState, setWsConnectionState] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+
+  // Logs for Mac Viewership Console
+  const [viewershipLogs, setViewershipLogs] = useState<string[]>([]);
+
+  // Accumulated Remote jobs for multipage crawl compilation
+  const remoteJobsRef = useRef<any[]>([]);
+
+  // Detect OS platform
+  useEffect(() => {
+    const detect = async () => {
+      try {
+        const plat = await GetPlatform();
+        setOsPlatform(plat.toLowerCase() as 'darwin' | 'windows');
+      } catch (_) {
+        setOsPlatform(navigator.userAgent.indexOf('Mac') !== -1 ? 'darwin' : 'windows');
+      }
+    };
+    detect();
+  }, []);
+
+  // Initialize Mac Performer Mode
+  useEffect(() => {
+    if (appMode === 'capture' && osPlatform === 'darwin') {
+      let isStopped = false;
+      const initMacPerformer = async () => {
+        try {
+          setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Starting Embedded WS Server on port 8081...`]);
+          await StartEmbeddedWSServer();
+          
+          const ips = await GetLocalIPAddresses();
+          setMacIPAddresses(ips);
+
+          setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Requesting unique 6-digit pairing code...`]);
+          
+          const res = await fetch('http://127.0.0.1:8081/create-room');
+          const data = await res.json();
+          if (isStopped) return;
+          const code = data.room;
+          setMacPairingCode(code);
+
+          setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Connecting Wails backend to room ${code}...`]);
+          await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
+          setMacConnectionStatus('Listening');
+          setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Viewership active. Ready to render safari-matched ePDFs.`]);
+        } catch (err: any) {
+          console.error(err);
+          setViewershipLogs(prev => [...prev, `[ERROR] Failed to start Performer: ${err.message || err}`]);
+        }
+      };
+
+      initMacPerformer();
+
+      // Listen for Go wails events
+      const destroyWSEvent = EventsOn('viewership_event', (msg: string) => {
+        setViewershipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+      });
+
+      return () => {
+        isStopped = true;
+        StopWSClient();
+        if (typeof destroyWSEvent === 'function') {
+          destroyWSEvent();
+        }
+      };
+    }
+  }, [appMode, osPlatform]);
+
   // Root States
   const [rootDirectory, setRootDirectory] = useState('');
   const [slides, setSlides] = useState<Slide[]>([]);
@@ -86,7 +173,6 @@ export const App: React.FC = () => {
   const [compilationProgress, setCompilationProgress] = useState<CompilationProgress | null>(null);
   const [isSingleSave, setIsSingleSave] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);
-
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -630,7 +716,11 @@ export const App: React.FC = () => {
       };
 
       updateProgress(`📸 Rendering PDF: ${desc}...`);
-      await CompileSingleStateToPDF(job, settleMs);
+      if (appMode === 'capture') {
+        remoteJobsRef.current.push(job);
+      } else {
+        await CompileSingleStateToPDF(job, settleMs);
+      }
     };
 
     // Load slide once
@@ -1657,10 +1747,135 @@ export const App: React.FC = () => {
     return { logLines };
   };
 
+  // WebSocket controller connection function for Windows
+  const connectToMac = (ip: string, code: string) => {
+    if (!ip || !code) {
+      alert("Please enter the Mac's IP address and the 6-digit pairing code.");
+      return;
+    }
+    setWsConnectionState('connecting');
+    const wsUrl = `ws://${ip}:8081/ws?room=${code}&role=windows`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      setWsConnectionState('connected');
+      setControllerWS(ws);
+      localStorage.setItem('capture-mac-ip', ip);
+      localStorage.setItem('capture-mac-code', code);
+    };
+
+    ws.onmessage = async (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'pdf') {
+          setCompilationProgress({
+            phase: 'merging',
+            current: 90,
+            total: 100,
+            slide: msg.filename,
+            detail: 'Downloading compiled Safari ePDF from Mac...'
+          });
+
+          const filename = remoteFilenameRef.current || msg.filename;
+          await SaveRemotePDF(filename, msg.data);
+          
+          setCompilationProgress({
+            phase: 'complete',
+            current: 100,
+            total: 100,
+            slide: filename,
+            detail: `Saved successfully: ${filename}`
+          });
+          
+          setTimeout(async () => {
+            setIsCompiling(false);
+            setCompilationProgress(null);
+            await refreshPDFList();
+          }, 1500);
+        } else if (msg.type === 'error') {
+          setIsCompiling(false);
+          setCompilationProgress(null);
+          alert(`Mac Compilation failed: ${msg.message}`);
+        } else if (msg.type === 'devices_list') {
+          try {
+            const list = JSON.parse(msg.data);
+            setConnectedClients(list);
+          } catch (_) {}
+        }
+      } catch (err: any) {
+        console.error("Error processing WS message:", err);
+      }
+    };
+
+    ws.onclose = () => {
+      setWsConnectionState('disconnected');
+      setControllerWS(null);
+    };
+
+    ws.onerror = (err) => {
+      console.error("WS error:", err);
+      setWsConnectionState('disconnected');
+      setControllerWS(null);
+      alert("Failed to connect to Mac Viewership. Please verify the IP Address, pairing code, and network connection.");
+    };
+  };
+
+  const remoteFilenameRef = useRef<string>('');
+  const [connectedClients, setConnectedClients] = useState<string[]>([]);
+
   // Compile Single Slide DOM Screenshot PDF
   const onSaveSlide = async () => {
     if (currentSlideIndex === -1 || isCompiling) return;
     const activeSlide = slides[currentSlideIndex];
+
+    if (appMode === 'capture') {
+      if (wsConnectionState !== 'connected' || !controllerWS) {
+        alert("Please connect to Mac Viewership first.");
+        return;
+      }
+      try {
+        setIsSingleSave(true);
+        setIsCompiling(true);
+        setCompilationProgress({
+          phase: 'rendering',
+          current: 1,
+          total: 1,
+          slide: activeSlide.name,
+          detail: 'Auto-capturing slide HTML DOM...'
+        });
+
+        const capturedHtml = await captureCurrentSlideState();
+        
+        setCompilationProgress({
+          phase: 'rendering',
+          current: 1,
+          total: 1,
+          slide: activeSlide.name,
+          detail: 'Requesting Safari rendering on Mac...'
+        });
+
+        const job = {
+          slideName: activeSlide.name,
+          folderName: activeSlide.folderName,
+          url: activeSlide.url,
+          customHtml: capturedHtml,
+          tempFilename: ''
+        };
+
+        remoteFilenameRef.current = `${activeSlide.name}.pdf`;
+        controllerWS?.send(JSON.stringify({
+          type: 'render_request',
+          jobs: [job]
+        }));
+      } catch (err: any) {
+        console.error('Save Slide failed:', err);
+        alert(`Save Slide failed: ${err.message || err}`);
+        setIsCompiling(false);
+        setIsSingleSave(false);
+        setCompilationProgress(null);
+      }
+      return;
+    }
 
     try {
       setIsSingleSave(true);
@@ -1717,6 +1932,13 @@ export const App: React.FC = () => {
     if (slides.length === 0 || isCompiling || currentSlideIndex === -1) return;
     const activeSlide = slides[currentSlideIndex];
 
+    if (appMode === 'capture') {
+      if (wsConnectionState !== 'connected' || !controllerWS) {
+        alert("Please connect to Mac Viewership first.");
+        return;
+      }
+    }
+
     try {
       setIsCompiling(true);
       setCompilationProgress({
@@ -1727,7 +1949,10 @@ export const App: React.FC = () => {
         detail: 'Initializing crawler session...'
       });
 
-      await StartPDFSession();
+      remoteJobsRef.current = [];
+      if (appMode !== 'capture') {
+        await StartPDFSession();
+      }
 
       const { logLines } = await automateOneSlideViaIframe(
         activeSlide, currentSlideIndex, slides.length, sleepMs
@@ -1747,41 +1972,56 @@ export const App: React.FC = () => {
               current: 90,
               total: 100,
               slide: activeSlide.name,
-              detail: 'Saving output PDF file...'
+              detail: appMode === 'capture' ? 'Requesting Safari rendering on Mac...' : 'Saving output PDF file...'
             });
 
-            const savePath = await GenerateNextAutoSlidePDFPath(currentSlideIndex);
-            await EndPDFSession(savePath);
+            if (appMode === 'capture') {
+              remoteFilenameRef.current = `auto_${activeSlide.name}.pdf`;
+              controllerWS?.send(JSON.stringify({
+                type: 'render_request',
+                jobs: remoteJobsRef.current
+              }));
+              remoteJobsRef.current = [];
+            } else {
+              const savePath = await GenerateNextAutoSlidePDFPath(currentSlideIndex);
+              await EndPDFSession(savePath);
 
-            setCompilationProgress({
-              phase: 'complete',
-              current: 100,
-              total: 100,
-              slide: activeSlide.name,
-              detail: 'Compilation finished.'
-            });
+              setCompilationProgress({
+                phase: 'complete',
+                current: 100,
+                total: 100,
+                slide: activeSlide.name,
+                detail: 'Compilation finished.'
+              });
 
-            await refreshPDFList();
+              await refreshPDFList();
+              setIsCompiling(false);
+              setCompilationProgress(null);
+            }
           } catch (err: any) {
             console.error('Finalize auto-slide fail:', err);
             alert(`Compilation failed: ${err.message || err}`);
-            try { await EndPDFSession(""); } catch (_) {}
-          } finally {
+            if (appMode !== 'capture') {
+              try { await EndPDFSession(""); } catch (_) {}
+            }
             setIsCompiling(false);
             setCompilationProgress(null);
+          } finally {
             handleReloadSlide();
           }
         },
         onCancel: async () => {
           setConfirmModalData(null);
-          try {
-            await EndPDFSession("");
-          } catch (_) {}
+          remoteJobsRef.current = [];
+          if (appMode !== 'capture') {
+            try {
+              await EndPDFSession("");
+            } catch (_) {}
+          }
           handleReloadSlide();
         }
       });
 
-      // Reload log triggers
       const downloadHelper = (window as any).downloadCrawlerLogs;
       if (downloadHelper) downloadHelper();
     } catch (err: any) {
@@ -1789,9 +2029,11 @@ export const App: React.FC = () => {
       alert(`Auto Slide failed: ${err.message || err}`);
       setIsCompiling(false);
       setCompilationProgress(null);
-      try {
-        await EndPDFSession("");
-      } catch (_) {}
+      if (appMode !== 'capture') {
+        try {
+          await EndPDFSession("");
+        } catch (_) {}
+      }
       handleReloadSlide();
     }
   };
@@ -1800,8 +2042,16 @@ export const App: React.FC = () => {
   const onFullAuto = async () => {
     if (slides.length === 0 || isCompiling) return;
 
+    if (appMode === 'capture') {
+      if (wsConnectionState !== 'connected' || !controllerWS) {
+        alert("Please connect to Mac Viewership first.");
+        return;
+      }
+    }
+
     try {
       setIsCompiling(true);
+      remoteJobsRef.current = [];
       
       setCompilationProgress({
         phase: 'crawling',
@@ -1822,46 +2072,71 @@ export const App: React.FC = () => {
         });
 
         try {
-          // Temporarily select slide in list to follow along visually
           setCurrentSlideIndex(idx);
           
-          await StartPDFSession();
+          if (appMode !== 'capture') {
+            await StartPDFSession();
+          }
+
           await automateOneSlideViaIframe(
             slide, idx, slides.length, sleepMs
           );
           
-          const savePath = await GenerateNextAutoSlidePDFPath(idx);
-          await EndPDFSession(savePath);
+          if (appMode !== 'capture') {
+            const savePath = await GenerateNextAutoSlidePDFPath(idx);
+            await EndPDFSession(savePath);
+          }
         } catch (err: any) {
           console.error(`Skipping slide ${slide.name} due to automation error:`, err);
-          try {
-            await EndPDFSession("");
-          } catch (_) {}
+          if (appMode !== 'capture') {
+            try {
+              await EndPDFSession("");
+            } catch (_) {}
+          }
         }
       }
 
-      setCompilationProgress({
-        phase: 'merging',
-        current: 95,
-        total: 100,
-        slide: 'Stitching presentation pages...',
-        detail: 'Combining compiled PDF slices...'
-      });
+      if (appMode === 'capture') {
+        setCompilationProgress({
+          phase: 'merging',
+          current: 95,
+          total: 100,
+          slide: 'Sending batch to Mac Performer...',
+          detail: 'Requesting Safari rendering on Mac...'
+        });
 
-      // Directly merge all single slide outputs
-      await CombineCompiledPDFs();
+        const presentationId = rootDirectory.split(/[/\\]/).filter(Boolean).pop() || 'deck';
+        remoteFilenameRef.current = `${presentationId}_deck.pdf`;
 
-      setCompilationProgress({
-        phase: 'complete',
-        current: 100,
-        total: 100,
-        slide: 'Presentation Compiled',
-        detail: 'Entire campaign deck compiled successfully.'
-      });
+        controllerWS?.send(JSON.stringify({
+          type: 'render_request',
+          jobs: remoteJobsRef.current
+        }));
+        remoteJobsRef.current = [];
+      } else {
+        setCompilationProgress({
+          phase: 'merging',
+          current: 95,
+          total: 100,
+          slide: 'Stitching presentation pages...',
+          detail: 'Combining compiled PDF slices...'
+        });
 
-      await refreshPDFList();
+        await CombineCompiledPDFs();
 
-      // Reset to first slide
+        setCompilationProgress({
+          phase: 'complete',
+          current: 100,
+          total: 100,
+          slide: 'Presentation Compiled',
+          detail: 'Entire campaign deck compiled successfully.'
+        });
+
+        await refreshPDFList();
+        setIsCompiling(false);
+        setCompilationProgress(null);
+      }
+
       if (slides.length > 0) {
         setCurrentSlideIndex(0);
       }
@@ -1871,7 +2146,6 @@ export const App: React.FC = () => {
     } catch (err: any) {
       console.error('Full Auto compilation failed:', err);
       alert(`Full Auto failed: ${err.message || err}`);
-    } finally {
       setIsCompiling(false);
       setCompilationProgress(null);
     }
@@ -1950,6 +2224,461 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshPDFList();
   }, []);
+
+  if (appMode === 'select') {
+    return (
+      <div 
+        className="app-container" 
+        style={{ 
+          height: '100vh', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          gap: '40px',
+          background: 'radial-gradient(circle at center, var(--bg-raised) 0%, var(--bg-deep) 100%)',
+          padding: '24px'
+        }}
+      >
+        <div style={{ textAlign: 'center', animation: 'fadeIn 0.5s ease-out' }}>
+          <h1 style={{ 
+            fontSize: '38px', 
+            fontWeight: 800, 
+            background: 'linear-gradient(135deg, var(--text-1) 30%, var(--accent) 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            letterSpacing: '-1px',
+            marginBottom: '10px'
+          }}>
+            NoCodex ePDF Studio
+          </h1>
+          <p style={{ color: 'var(--text-3)', fontSize: '14px', fontWeight: 500 }}>
+            Select your workspace orchestration layout
+          </p>
+        </div>
+
+        <div 
+          style={{ 
+            display: 'flex', 
+            gap: '24px', 
+            maxWidth: '860px', 
+            width: '100%',
+            justifyContent: 'center',
+            animation: 'slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}
+        >
+          {/* Builder Mode Option Card */}
+          <div 
+            onClick={() => setAppMode('builder')}
+            style={{
+              flex: 1,
+              padding: '32px',
+              borderRadius: 'var(--radius-xl)',
+              background: 'rgba(255, 255, 255, 0.015)',
+              border: '1px solid var(--border-1)',
+              cursor: 'pointer',
+              transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              position: 'relative',
+              overflow: 'hidden'
+            }}
+            className="mode-card"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-6px)';
+              e.currentTarget.style.borderColor = 'var(--purple)';
+              e.currentTarget.style.boxShadow = '0 12px 30px rgba(167, 139, 250, 0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'none';
+              e.currentTarget.style.borderColor = 'var(--border-1)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: 'var(--radius-lg)',
+              backgroundColor: 'var(--purple-dim)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--purple)',
+              fontSize: '20px',
+              fontWeight: 'bold'
+            }}>
+              ⚙️
+            </div>
+            <div>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-1)', marginBottom: '8px' }}>
+                Builder Mode
+              </h2>
+              <p style={{ fontSize: '13px', color: 'var(--text-2)', lineHeight: '1.6' }}>
+                Standalone execution engine. Run page captures, crawls, and compile presentation decks locally on this machine using standard headless Chromium engine.
+              </p>
+            </div>
+            <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--purple)', fontWeight: 600 }}>
+              Launch standalone builder ➔
+            </div>
+          </div>
+
+          {/* Capture Mode Option Card */}
+          <div 
+            onClick={() => setAppMode('capture')}
+            style={{
+              flex: 1,
+              padding: '32px',
+              borderRadius: 'var(--radius-xl)',
+              background: 'rgba(255, 255, 255, 0.015)',
+              border: '1px solid var(--border-1)',
+              cursor: 'pointer',
+              transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              position: 'relative',
+              overflow: 'hidden'
+            }}
+            className="mode-card"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-6px)';
+              e.currentTarget.style.borderColor = 'var(--accent)';
+              e.currentTarget.style.boxShadow = '0 12px 30px rgba(0, 242, 254, 0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'none';
+              e.currentTarget.style.borderColor = 'var(--border-1)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: 'var(--radius-lg)',
+              backgroundColor: 'var(--accent-dim)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--accent)',
+              fontSize: '20px',
+              fontWeight: 'bold'
+            }}>
+              🔗
+            </div>
+            <div>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-1)', marginBottom: '8px' }}>
+                Capture Mode
+              </h2>
+              <p style={{ fontSize: '13px', color: 'var(--text-2)', lineHeight: '1.6' }}>
+                Cross-platform orchestrator link. Pair Windows controllers with a macOS Performer to generate high-accuracy Safari-rendered ePDFs seamlessly.
+              </p>
+            </div>
+            <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}>
+              Launch collaborative workspace ➔
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // MAC PERFORMER / VIEWERSHIP VIEW
+  if (appMode === 'capture' && osPlatform === 'darwin') {
+    return (
+      <div 
+        className="app-container" 
+        style={{ 
+          height: '100vh', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          backgroundColor: 'var(--bg-deep)',
+          padding: '24px'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexShrink: 0 }}>
+          <div>
+            <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-1)' }}>
+              Mac Viewership Performer
+            </h1>
+            <p style={{ fontSize: '12px', color: 'var(--text-3)', fontWeight: 500 }}>
+              WebSocket Engine Status: <span style={{ color: 'var(--success)', fontWeight: 700 }}>{macConnectionStatus}</span>
+            </p>
+          </div>
+          <button 
+            onClick={() => setAppMode('select')}
+            style={{
+              backgroundColor: 'var(--bg-raised)',
+              border: '1px solid var(--border-1)',
+              color: 'var(--text-2)',
+              padding: '6px 14px',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            ← Reset Mode
+          </button>
+        </div>
+
+        {/* Viewership Empty Space Screen Layout */}
+        <div style={{ display: 'flex', gap: '20px', flex: 1, overflow: 'hidden' }}>
+          {/* Main Info Board */}
+          <div 
+            className="glass-panel" 
+            style={{ 
+              flex: 1, 
+              borderRadius: 'var(--radius-lg)', 
+              padding: '40px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              gap: '24px',
+              border: '1px solid var(--border-accent)',
+              boxShadow: '0 8px 32px rgba(0, 242, 254, 0.03)'
+            }}
+          >
+            <div style={{ fontSize: '48px' }}>🖥️</div>
+            <div>
+              <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-1)' }}>
+                Safari Rendering Viewership Active
+              </h2>
+              <p style={{ color: 'var(--text-2)', fontSize: '13px', marginTop: '6px', maxWidth: '440px', margin: '6px auto 0' }}>
+                This Mac is now serving as the Performer node. Connect from any Windows Controller on your network to render pixel-perfect Safari-styled PDFs.
+              </p>
+            </div>
+
+            {/* Glowing 6-digit code */}
+            <div style={{
+              padding: '24px 40px',
+              borderRadius: 'var(--radius-xl)',
+              background: 'rgba(0, 242, 254, 0.03)',
+              border: '2px dashed var(--accent)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--accent)', letterSpacing: '2px', textTransform: 'uppercase' }}>
+                Pairing Room Code
+              </span>
+              <span style={{ 
+                fontSize: '42px', 
+                fontWeight: 900, 
+                color: 'var(--text-1)', 
+                fontFamily: 'var(--font-mono)', 
+                letterSpacing: '6px',
+                textShadow: '0 0 20px rgba(0, 242, 254, 0.4)'
+              }}>
+                {macPairingCode || '------'}
+              </span>
+            </div>
+
+            {/* local network IPs */}
+            <div style={{ fontSize: '12px', color: 'var(--text-3)' }}>
+              <strong style={{ color: 'var(--text-2)' }}>Target Mac Network IPs:</strong>{' '}
+              {macIPAddresses.length > 0 ? (
+                macIPAddresses.map((ip, i) => (
+                  <span key={ip} style={{ 
+                    fontFamily: 'var(--font-mono)', 
+                    color: 'var(--accent)', 
+                    fontWeight: 700,
+                    marginRight: '8px'
+                  }}>
+                    {ip}{i < macIPAddresses.length - 1 ? ',' : ''}
+                  </span>
+                ))
+              ) : (
+                <span>Detecting local IPs...</span>
+              )}
+            </div>
+
+            {/* Paired devices counter */}
+            <div style={{ fontSize: '12px', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: connectedClients.length > 0 ? 'var(--success)' : 'var(--text-3)'
+              }} />
+              <span>{connectedClients.length} Connected Controller(s)</span>
+            </div>
+          </div>
+
+          {/* Activity Console Logs Log */}
+          <div 
+            className="glass-panel" 
+            style={{ 
+              width: '380px', 
+              borderRadius: 'var(--radius-lg)', 
+              display: 'flex', 
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}
+          >
+            <div style={{ 
+              padding: '12px 16px', 
+              borderBottom: '1px solid var(--border-1)', 
+              fontSize: '12px', 
+              fontWeight: 700, 
+              color: 'var(--text-2)',
+              backgroundColor: 'var(--bg-raised)'
+            }}>
+              Activity Console Logs
+            </div>
+            <div style={{ 
+              flex: 1, 
+              padding: '16px', 
+              fontFamily: 'var(--font-mono)', 
+              fontSize: '11px', 
+              color: 'var(--text-3)', 
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              {viewershipLogs.map((log, i) => (
+                <div key={i} style={{ 
+                  lineHeight: '1.5',
+                  color: log.includes('[ERROR]') ? 'var(--rose)' : log.includes('Success') || log.includes('Finished') ? 'var(--success)' : 'var(--text-2)'
+                }}>
+                  {log}
+                </div>
+              ))}
+              {viewershipLogs.length === 0 && (
+                <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Console logs will print here...</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // WINDOWS PAIRING PANEL
+  if (appMode === 'capture' && osPlatform === 'windows' && wsConnectionState !== 'connected') {
+    return (
+      <div 
+        className="app-container" 
+        style={{ 
+          height: '100vh', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          background: 'radial-gradient(circle at center, var(--bg-raised) 0%, var(--bg-deep) 100%)',
+          padding: '24px'
+        }}
+      >
+        <div 
+          className="glass-panel"
+          style={{
+            width: '440px',
+            borderRadius: 'var(--radius-xl)',
+            padding: '32px',
+            border: '1px solid var(--border-accent)',
+            boxShadow: 'var(--shadow-main)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px',
+            animation: 'slideUp 0.4s ease-out'
+          }}
+        >
+          <div style={{ textAlign: 'center' }}>
+            <span style={{ fontSize: '32px' }}>🔗</span>
+            <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-1)', marginTop: '10px' }}>
+              Safari Performer Link
+            </h2>
+            <p style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '4px' }}>
+              Enter Mac IP Address and pairing code to route compiles to Mac
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-2)' }}>Mac IP Address</label>
+              <input 
+                type="text" 
+                value={targetMacIP}
+                onChange={(e) => setTargetMacIP(e.target.value)}
+                placeholder="e.g. 192.168.1.50 or localhost"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--bg-deep)',
+                  border: '1px solid var(--border-1)',
+                  color: 'var(--text-1)',
+                  fontSize: '13px',
+                  fontFamily: 'var(--font-mono)'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-2)' }}>6-Digit Pairing Code</label>
+              <input 
+                type="text" 
+                value={targetMacCode}
+                onChange={(e) => setTargetMacCode(e.target.value)}
+                placeholder="e.g. 839210"
+                maxLength={6}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--bg-deep)',
+                  border: '1px solid var(--border-1)',
+                  color: 'var(--text-1)',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  fontFamily: 'var(--font-mono)',
+                  letterSpacing: '2px',
+                  textAlign: 'center'
+                }}
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={() => connectToMac(targetMacIP, targetMacCode)}
+            disabled={wsConnectionState === 'connecting'}
+            style={{
+              background: 'linear-gradient(135deg, var(--accent), var(--blue))',
+              border: 'none',
+              color: 'var(--bg-deep)',
+              padding: '12px',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              boxShadow: '0 3px 10px rgba(var(--accent-rgb), 0.2)'
+            }}
+          >
+            {wsConnectionState === 'connecting' ? 'Connecting to Mac...' : 'Pair Controller ➔'}
+          </button>
+
+          <button
+            onClick={() => setAppMode('select')}
+            style={{
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: 'var(--text-3)',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              textAlign: 'center'
+            }}
+          >
+            ← Cancel and select mode
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (studioOpen) {
     return (
@@ -2066,6 +2795,41 @@ export const App: React.FC = () => {
                 : 'Idle'}
             </span>
           </div>
+
+          {appMode === 'capture' && (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              borderLeft: '1px solid var(--border-1)',
+              paddingLeft: '12px',
+              fontSize: '11px'
+            }}>
+              <div style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: wsConnectionState === 'connected' ? 'var(--success)' : 'var(--rose)'
+              }} />
+              <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>
+                Safari Link: {wsConnectionState === 'connected' ? `Connected to Mac (${targetMacIP})` : 'Disconnected'}
+              </span>
+              <button 
+                onClick={() => setWsConnectionState('disconnected')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--accent)',
+                  fontSize: '10px',
+                  cursor: 'pointer',
+                  marginLeft: '4px',
+                  fontWeight: 700
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
+          )}
         </div>
 
         {isCompiling && compilationProgress && (
@@ -2187,7 +2951,6 @@ export const App: React.FC = () => {
         />
       )}
     </div>
-
   );
 };
 export default App;
