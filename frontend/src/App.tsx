@@ -1920,6 +1920,9 @@ export const App: React.FC = () => {
         }
       } catch (err: any) {
         console.error("Error processing WS message:", err);
+        setIsCompiling(false);
+        setCompilationProgress(null);
+        alert(`Error processing WS message: ${err.message || err}`);
       }
     };
 

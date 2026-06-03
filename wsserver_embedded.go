@@ -269,7 +269,10 @@ func (c *WSClient) readPump() {
 				targetClient := c.srv.clients[msg.Target]
 				c.srv.mu.Unlock()
 				if targetClient != nil {
+					log.Printf("[WSServer] Routing message %s (%s) -> %s\n", msg.Type, c.id, msg.Target)
 					targetClient.send <- msg
+				} else {
+					log.Printf("[WSServer] Target client %s not found for message %s\n", msg.Target, msg.Type)
 				}
 			}
 		case "room_command":
