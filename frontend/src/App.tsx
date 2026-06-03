@@ -469,7 +469,7 @@ export const App: React.FC = () => {
 
       try {
         if (iframeRef.current && iframeRef.current.contentWindow) {
-          iframeRef.current.contentWindow.postMessage({ type: 'request_html' }, '*');
+          iframeRef.current.contentWindow.postMessage(JSON.stringify({ type: 'request_html' }), '*');
         } else {
           clearTimeout(timeout);
           window.removeEventListener('message', handler);
@@ -505,7 +505,7 @@ export const App: React.FC = () => {
 
       try {
         if (iframeRef.current && iframeRef.current.contentWindow) {
-          iframeRef.current.contentWindow.postMessage({ type: 'iframe_execute', id, code }, '*');
+          iframeRef.current.contentWindow.postMessage(JSON.stringify({ type: 'iframe_execute', id, code }), '*');
         } else {
           clearTimeout(timeout);
           window.removeEventListener('message', handler);
@@ -609,7 +609,7 @@ export const App: React.FC = () => {
 
       try {
         if (iframeRef.current && iframeRef.current.contentWindow) {
-          iframeRef.current.contentWindow.postMessage({ type: 'iframe_close_dialogs' }, '*');
+          iframeRef.current.contentWindow.postMessage(JSON.stringify({ type: 'iframe_close_dialogs' }), '*');
         } else {
           clearTimeout(timeout);
           window.removeEventListener('message', handler);

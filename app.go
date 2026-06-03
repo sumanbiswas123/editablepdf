@@ -427,8 +427,18 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
 })();
 
 window.addEventListener('message', function(e) {
+  var data = e.data;
+  if (typeof data === 'string') {
+    try {
+      var parsed = JSON.parse(data);
+      if (parsed && typeof parsed === 'object') {
+        data = parsed;
+      }
+    } catch(_) {}
+  }
+
   // ─── Handle: request_html (DOM capture for PDF compilation) ───
-  var isRequestHtml = e.data === 'request_html' || (e.data && e.data.type === 'request_html');
+  var isRequestHtml = data === 'request_html' || (data && data.type === 'request_html');
   if (isRequestHtml) {
     // 1. Locate the topmost active popup in standard DOM (excluding backdrop overlays)
     var topActivePopup = null;
@@ -509,9 +519,9 @@ window.addEventListener('message', function(e) {
   }
 
   // ─── Handle: iframe_execute (run arbitrary JS and return result) ───
-  if (e.data && e.data.type === 'iframe_execute') {
-    var id = e.data.id;
-    var code = e.data.code;
+  if (data && data.type === 'iframe_execute') {
+    var id = data.id;
+    var code = data.code;
     try {
       var result = (new Function('return (' + code + ')'))();
       // If result is a Promise (async code), wait for it
@@ -531,8 +541,8 @@ window.addEventListener('message', function(e) {
   }
 
   // ─── Handle: iframe_click (click element by CSS selector) ───
-  if (e.data && e.data.type === 'iframe_click') {
-    var selector = e.data.selector;
+  if (data && data.type === 'iframe_click') {
+    var selector = data.selector;
     try {
       var el = document.querySelector(selector);
       if (el) {
@@ -553,7 +563,7 @@ window.addEventListener('message', function(e) {
   }
 
   // ─── Handle: iframe_close_dialogs (close all visible popups/dialogs) ───
-  if (e.data && e.data.type === 'iframe_close_dialogs') {
+  if (data && data.type === 'iframe_close_dialogs') {
     try {
       var closed = false;
       // 1. Try jQuery UI dialog close buttons
