@@ -19,8 +19,8 @@ func main() {
 	// Create application with options
 	err := wails.Run(&options.App{
 		Title:  "htmltoepdf",
-		Width:  1024,
-		Height: 768,
+		Width:  2048,
+		Height: 1536,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

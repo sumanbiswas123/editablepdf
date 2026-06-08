@@ -127,8 +127,8 @@ func GenerateIDMLPackage(slides []IDMLSlide, outputPath string) error {
 	masterSpreadXml := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <idPkg:MasterSpread xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="8.0">
   <MasterSpread Self="MasterSpread/M1" Name="A-Master" ShowMasterItems="true">
-    <Page Self="Page/Master_M1_L" PageSide="LeftHand" MasterPageTransform="1 0 0 1 0 0" GeometricBounds="0 0 576 768"/>
-    <Page Self="Page/Master_M1_R" PageSide="RightHand" MasterPageTransform="1 0 0 1 0 0" GeometricBounds="0 0 576 768"/>
+    <Page Self="Page/Master_M1_L" PageSide="LeftHand" MasterPageTransform="1 0 0 1 0 0" GeometricBounds="0 0 576 1536"/>
+    <Page Self="Page/Master_M1_R" PageSide="RightHand" MasterPageTransform="1 0 0 1 0 0" GeometricBounds="0 0 576 1536"/>
   </MasterSpread>
 </idPkg:MasterSpread>`
 	if err := writeZipFile(archive, "MasterSpreads/MasterSpread_M1.xml", masterSpreadXml); err != nil {
@@ -199,7 +199,7 @@ func buildDesignMap(spreadRefs []string, storyRefs []string) string {
   <idPkg:MasterSpread src="MasterSpreads/MasterSpread_M1.xml" />
 %s
 %s
-  <DocumentPreference PageWidth="768" PageHeight="576" PagesPerDocument="1" SideBySide="false" ViewSetUp="SinglePage" />
+  <DocumentPreference PageWidth="1536" PageHeight="576" PagesPerDocument="1" SideBySide="false" ViewSetUp="SinglePage" />
   <Layer Self="Layer/Layer 1" Name="Layer 1" Visible="true" Locked="false" ShowGuides="true" SnapToGuides="true" UserColor="LightBlue" />
 </Document>`, spreadsXML.String(), storiesXML.String())
 }
@@ -243,8 +243,8 @@ func buildStoryXML(slideIndex int, elIndex int, el IDMLElement) string {
 }
 
 func buildSpreadXML(index int, slide IDMLSlide) string {
-	widthPt := pxToPt(1024)
-	heightPt := pxToPt(768)
+	widthPt := pxToPt(2048)
+	heightPt := pxToPt(1536)
 
 	var elementsXML strings.Builder
 
