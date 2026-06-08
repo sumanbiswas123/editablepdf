@@ -30,6 +30,7 @@ check_setup() {
         # Install Wails v3
         echo "Installing portable Wails v3 CLI..."
         go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+        rm -f .gopath/bin/wails
         ln -sf wails3 .gopath/bin/wails
         
         # Install frontend deps
