@@ -1,5 +1,5 @@
 import { FolderOpen, Sun, Moon, RefreshCw, Sliders, Cpu, Sparkles } from 'lucide-react';
-import { StartWSClient, StopWSClient, SelectDirectory } from '../../bindings/htmltoepdf/app';
+import { StartWSClient, StopWSClient, SelectDirectory, OpenBuilderWindow } from '../../bindings/htmltoepdf/app';
 import React, { useState } from 'react';
 
 interface HeaderProps {
@@ -242,6 +242,36 @@ export const Header: React.FC<HeaderProps> = ({
             <button onClick={handleStopWS} style={{ height: '32px', padding: '0 10px', borderRadius: '8px' }}>Stop WS</button>
           )}
         </div>
+      )}
+      {appMode === 'capture' && (
+        <button
+          onClick={async () => {
+            try {
+              await OpenBuilderWindow();
+            } catch (err) {
+              console.error('Failed to open builder window:', err);
+            }
+          }}
+          style={{
+            background: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid var(--border-accent)',
+            color: 'var(--accent)',
+            height: '32px',
+            padding: '0 12px',
+            borderRadius: '8px',
+            fontSize: '11px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            transition: 'all var(--transition)'
+          }}
+          className="action-btn"
+          title="Open Builder in New Window"
+        >
+          ⚙️ Open Builder
+        </button>
       )}
       <button
         onClick={onOpenStudio}
