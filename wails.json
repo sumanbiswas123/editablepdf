@@ -2,7 +2,7 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "htmltoepdf",
   "outputfilename": "htmltoepdf.exe",
-  "frontend:install": "bun install || npm install",
+  "frontend:install": "",
   "frontend:build": "bun run build || npm run build",
   "frontend:dev:watcher": "bun run dev || npm run dev",
   "frontend:dev:serverUrl": "auto",

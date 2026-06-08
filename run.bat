@@ -4,7 +4,8 @@ setlocal enabledelayedexpansion
 :: Setup local paths
 set "PATH=%CD%\.go_sdk\go\bin;%PATH%"
 set "GOPATH=%CD%\.gopath"
-set "PATH=%GOPATH%\bin;%PATH%"
+set "GOBIN=%GOPATH%\bin"
+set "PATH=%GOBIN%;%PATH%"
 
 :: Check setup
 if not exist .go_sdk\go\bin\go.exe goto do_setup

@@ -16,4 +16,12 @@ tasks:
     summary: Builds the Windows application
     cmds:
       - task: frontend:build
-      - GOOS=windows GOARCH=amd64 go build -o htmltoepdf.exe
+      - GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o htmltoepdf.exe
+
+  run:
+    summary: Runs the application
+    cmds:
+      - cmd: ./htmltoepdf
+        platforms: [darwin, linux]
+      - cmd: ./htmltoepdf.exe
+        platforms: [windows]

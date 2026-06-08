@@ -23,5 +23,5 @@ dev_mode:
       type: background
     - cmd: "go build -o htmltoepdf"
       type: blocking
-    - cmd: "./htmltoepdf"
+    - cmd: "wails task run"
       type: primary
