@@ -43,5 +43,5 @@ tasks:
     cmds:
       - cmd: ./htmltoepdf
         platforms: [darwin, linux]
-      - cmd: htmltoepdf.exe
+      - cmd: ./htmltoepdf.exe
         platforms: [windows]
