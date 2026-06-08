@@ -14,20 +14,10 @@ func main() {
 	// Create an instance of the app structure
 	appService := NewApp()
 
-	// Create application with options
-<<<<<<< HEAD
-	err := wails.Run(&options.App{
-		Title:  "htmltoepdf",
-		Width:  2048,
-		Height: 1536,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-=======
 	app := application.New(application.Options{
 		Name: "htmltoepdf",
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
->>>>>>> 53eff091e7320a5947094ffd318db4a2baf95108
 		},
 		Services: []application.Service{
 			application.NewService(appService),
