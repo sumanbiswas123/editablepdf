@@ -50,7 +50,7 @@ tasks:
   run:
     summary: Runs the application
     cmds:
-      - cmd: ./htmltoepdf
+      - cmd: ./bin/htmltoepdf
         platforms: [darwin, linux]
-      - cmd: ./htmltoepdf.exe
+      - cmd: ./bin/htmltoepdf.exe
         platforms: [windows]
