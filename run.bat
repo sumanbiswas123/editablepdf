@@ -24,6 +24,7 @@ del go_sdk.zip
 
 :: Install Wails v3
 go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+copy /y .gopath\bin\wails3.exe .gopath\bin\wails.exe >nul 2>&1
 
 :: Install frontend deps
 where bun >nul 2>nul
@@ -38,16 +39,16 @@ echo Setup complete!
 echo ==========================================
 echo    NoCodex ePDF Studio - Portable Run
 echo ==========================================
-echo 1) Start Development Mode (wails3 dev)
+echo 1) Start Development Mode (wails dev)
 echo 2) Build Standalone Windows (.exe) App
 echo 3) Re-run Setup / Update Dependencies
 echo ==========================================
 set /p CHOICE="Select an option (1-3): "
 
 if "%CHOICE%"=="1" (
-    wails3 dev
+    wails dev
 ) else if "%CHOICE%"=="2" (
-    wails3 task windows:build
+    wails task windows:build
 ) else if "%CHOICE%"=="3" (
     rmdir /s /q .go_sdk .gopath 2>nul
     goto do_setup

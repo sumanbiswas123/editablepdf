@@ -30,6 +30,7 @@ check_setup() {
         # Install Wails v3
         echo "Installing portable Wails v3 CLI..."
         go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+        ln -sf wails3 .gopath/bin/wails
         
         # Install frontend deps
         echo "Installing frontend dependencies..."
@@ -50,7 +51,7 @@ if [ -z "$ACTION" ]; then
     echo "=========================================="
     echo "   NoCodex ePDF Studio - Portable Run"
     echo "=========================================="
-    echo "1) Start Development Mode (wails3 dev)"
+    echo "1) Start Development Mode (wails dev)"
     echo "2) Build Standalone macOS App"
     echo "3) Build Standalone Windows (.exe) App"
     echo "4) Re-run Setup / Update Dependencies"
@@ -67,13 +68,13 @@ fi
 
 case $ACTION in
     dev)
-        wails3 dev
+        wails dev
         ;;
     build-mac)
-        wails3 build
+        wails task darwin:package
         ;;
     build-win)
-        wails3 task windows:build
+        wails task windows:build
         ;;
     setup)
         # Force reinstall
