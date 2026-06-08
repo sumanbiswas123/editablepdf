@@ -20,7 +20,7 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
 )
 
 // OpenDirectory opens the output directory in the native file explorer
@@ -1149,7 +1149,7 @@ func (a *App) AutomateDeck(sleepMs int) (string, error) {
 
 	for slideIdx, slide := range slides {
 		// Emit progress update: Rendering base slide
-		wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+		a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 			"current": slideIdx + 1,
 			"total":   len(slides),
 			"slide":   slide.Name,
@@ -1192,7 +1192,7 @@ func (a *App) AutomateDeck(sleepMs int) (string, error) {
 				})()`, sid)
 				err = chromedp.Run(ctx, chromedp.Evaluate(jsCheck, &isVisible))
 				if err == nil && isVisible {
-					wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+					a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 						"current": slideIdx + 1,
 						"total":   len(slides),
 						"slide":   slide.Name,
@@ -1327,7 +1327,7 @@ func (a *App) AutomateDeck(sleepMs int) (string, error) {
 			})()`
 			err = chromedp.Run(ctx, chromedp.Evaluate(jsCheckRef, &hasSlideRef))
 			if err == nil && hasSlideRef {
-				wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+				a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 					"current": slideIdx + 1,
 					"total":   len(slides),
 					"slide":   slide.Name,
@@ -1451,7 +1451,7 @@ func (a *App) AutomateDeck(sleepMs int) (string, error) {
 
 		if err == nil && len(triggers) > 0 {
 			for triggerIdx, t := range triggers {
-				wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+				a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 					"current": slideIdx + 1,
 					"total":   len(slides),
 					"slide":   slide.Name,
@@ -1499,7 +1499,7 @@ func (a *App) AutomateDeck(sleepMs int) (string, error) {
 
 						err = chromedp.Run(ctx, chromedp.Evaluate(jsCheckDialogRef, &hasDialogRef))
 						if err == nil && hasDialogRef {
-							wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+							a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 								"current": slideIdx + 1,
 								"total":   len(slides),
 								"slide":   slide.Name,
@@ -1546,7 +1546,7 @@ func (a *App) AutomateDeck(sleepMs int) (string, error) {
 	}
 
 	// E. MERGE ALL PDFs AND WRITE MASTER METADATA PROPERTIES
-	wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+	a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 		"current": len(slides),
 		"total":   len(slides),
 		"slide":   "Stitching Decks",
@@ -2057,7 +2057,7 @@ func (a *App) AutomateActiveSlide(slideFolder string, sleepMs int) (string, erro
 	pdfCounter := 0
 
 	// Emit progress update: Rendering base slide
-	wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+	a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 		"current": 1,
 		"total":   4,
 		"slide":   targetSlide.Name,
@@ -2100,7 +2100,7 @@ func (a *App) AutomateActiveSlide(slideFolder string, sleepMs int) (string, erro
 			})()`, sid)
 			err = chromedp.Run(ctx, chromedp.Evaluate(jsCheck, &isVisible))
 			if err == nil && isVisible {
-				wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+				a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 					"current": 2,
 					"total":   4,
 					"slide":   targetSlide.Name,
@@ -2249,7 +2249,7 @@ func (a *App) AutomateActiveSlide(slideFolder string, sleepMs int) (string, erro
 		})()`
 		err = chromedp.Run(ctx, chromedp.Evaluate(jsCheckRef, &hasSlideRef))
 		if err == nil && hasSlideRef {
-			wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+			a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 				"current": 2,
 				"total":   4,
 				"slide":   targetSlide.Name,
@@ -2373,7 +2373,7 @@ func (a *App) AutomateActiveSlide(slideFolder string, sleepMs int) (string, erro
 
 	if err == nil && len(triggers) > 0 {
 		for triggerIdx, t := range triggers {
-			wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+			a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 				"current": 3,
 				"total":   4,
 				"slide":   targetSlide.Name,
@@ -2422,7 +2422,7 @@ func (a *App) AutomateActiveSlide(slideFolder string, sleepMs int) (string, erro
 
 					err = chromedp.Run(ctx, chromedp.Evaluate(jsCheckDialogRef, &hasDialogRef))
 					if err == nil && hasDialogRef {
-						wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+						a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 							"current": 3,
 							"total":   4,
 							"slide":   targetSlide.Name,
@@ -2468,7 +2468,7 @@ func (a *App) AutomateActiveSlide(slideFolder string, sleepMs int) (string, erro
 	}
 
 	// E. MERGE ALL PDFs AND WRITE MASTER METADATA PROPERTIES
-	wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+	a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 		"current": 4,
 		"total":   4,
 		"slide":   "Saving Slide PDF",
@@ -2842,15 +2842,10 @@ func (a *App) CombineCustomPDFs(filenames []string, combinedMetadataJSON string)
 
 // SelectPDFFile opens a system dialog to choose a PDF file and returns its path
 func (a *App) SelectPDFFile() (string, error) {
-	filePath, err := wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{
-		Title: "Select PDF File to Import",
-		Filters: []wailsRuntime.FileFilter{
-			{
-				DisplayName: "PDF Files (*.pdf)",
-				Pattern:     "*.pdf",
-			},
-		},
-	})
+	filePath, err := a.app.Dialog.OpenFile().
+		SetTitle("Select PDF File to Import").
+		AddFilter("PDF Files (*.pdf)", "*.pdf").
+		PromptForSingleSelection()
 	if err != nil {
 		return "", err
 	}
@@ -3069,6 +3064,15 @@ func (a *App) RebuildCombinedPDF(originalFilename string, pagePaths []string, pa
 	return finalPath, nil
 }
 
-
-
-
+// ShareFile returns a local-network URL for a compiled deck PDF
+func (a *App) ShareFile(filename string) (string, error) {
+	if a.currentDir == "" || a.serverPort == 0 {
+		return "", fmt.Errorf("no workspace loaded or server not running")
+	}
+	ips := a.GetLocalIPAddresses()
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no local network IP address found")
+	}
+	// Use the first local IP
+	return fmt.Sprintf("http://%s:%d/share/%s", ips[0], a.serverPort, filename), nil
+}

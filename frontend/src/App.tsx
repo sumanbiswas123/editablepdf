@@ -37,20 +37,21 @@ import {
   CaptureCustomStateHTML,
   CleanUpTempHTML,
   SyncWorkspaceToMac,
-  ReadLocalFile
-} from '../wailsjs/go/main/App';
+  ReadLocalFile,
+  OpenBuilderWindow
+} from '../bindings/htmltoepdf/app';
 
-import { EventsOn } from '../wailsjs/runtime/runtime';
+import { Events } from '@wailsio/runtime';
 import { StudioPage } from './components/StudioPage';
 
 // Helper to safely bind Wails events (guards against undefined runtime in standard web browsers)
-const safeEventsOn = (eventName: string, callback: (...args: any[]) => void): (() => void) => {
-  if (typeof window !== 'undefined' && (window as any).runtime) {
-    try {
-      return EventsOn(eventName, callback);
-    } catch (e) {
-      console.warn(`EventsOn failed for ${eventName}:`, e);
-    }
+const safeEventsOn = (eventName: string, callback: (data: any) => void): (() => void) => {
+  try {
+    return Events.On(eventName, (event) => {
+      callback(event.data);
+    });
+  } catch (e) {
+    console.warn(`Events.On failed for ${eventName}:`, e);
   }
   return () => {};
 };
@@ -89,7 +90,13 @@ export const App: React.FC = () => {
   });
 
   // ─── Builder vs Capture Mode states ───
-  const [appMode, setAppMode] = useState<'select' | 'builder' | 'capture'>('select');
+  const [appMode, setAppMode] = useState<'select' | 'builder' | 'capture'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'builder') {
+      return 'builder';
+    }
+    return 'capture';
+  });
   const [osPlatform, setOsPlatform] = useState<'darwin' | 'windows' | ''>('');
   
   // Mac Performer details
@@ -157,7 +164,7 @@ export const App: React.FC = () => {
           let matched = ips[0];
           if (targetMacIP) {
             const macPrefix = targetMacIP.split('.').slice(0, 3).join('.'); // e.g., "192.168.1"
-            const matching = ips.find(ip => ip.startsWith(macPrefix));
+            const matching = ips.find((ip: string) => ip.startsWith(macPrefix));
             if (matching) {
               matched = matching;
             }
@@ -949,7 +956,7 @@ export const App: React.FC = () => {
         slideName: slide.name,
         folderName: slide.folderName,
         url: renderUrl,
-        customHtml: '', // empty so Mac Performer handles it as direct URL
+        customHtml: appMode === 'capture' ? '' : html,
         tempFilename: ''
       };
 
@@ -2860,10 +2867,7 @@ export const App: React.FC = () => {
             </p>
           </div>
           <button 
-            onClick={() => {
-              initializedRef.current = false;
-              setAppMode('select');
-            }}
+            onClick={() => OpenBuilderWindow()}
             style={{
               background: 'rgba(255, 255, 255, 0.04)',
               backdropFilter: 'blur(16px)',
@@ -2889,7 +2893,7 @@ export const App: React.FC = () => {
               e.currentTarget.style.transform = 'scale(1)';
             }}
           >
-            ← Reset Mode
+            ⚙️ Open Builder
           </button>
         </div>
 
@@ -3186,7 +3190,7 @@ export const App: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setAppMode('select')}
+            onClick={() => OpenBuilderWindow()}
             style={{
               backgroundColor: 'transparent',
               border: 'none',
@@ -3197,7 +3201,7 @@ export const App: React.FC = () => {
               textAlign: 'center'
             }}
           >
-            ← Cancel and select mode
+            ⚙️ Open Builder Mode (New Window)
           </button>
         </div>
       </div>
@@ -3229,6 +3233,7 @@ export const App: React.FC = () => {
         theme={theme}
         toggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
         onOpenStudio={() => setStudioOpen(true)}
+        appMode={appMode}
       />
 
       {/* 2. Main content panels wrapper */}
@@ -3278,6 +3283,8 @@ export const App: React.FC = () => {
           onOpenPDFViewer={(pdf) => setActiveViewerPDF(pdf)}
           onOpenMetadata={(pdf) => setActiveMetadataPDF(pdf)}
           isCompiling={isCompiling}
+          appMode={appMode}
+          osPlatform={osPlatform}
         />
       </div>
 

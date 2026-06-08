@@ -1,0 +1,27 @@
+info:
+  productname: "htmltoepdf"
+  productversion: "1.0.0"
+  company: "NoCodex"
+  copyright: "© 2026 NoCodex"
+  identifier: "com.nocodex.htmltoepdf"
+
+dev_mode:
+  root_path: .
+  log_level: info
+  debounce: 500
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - bin
+      - .go_sdk
+      - .gopath
+      - .wails_bin
+      - frontend
+  executes:
+    - cmd: "bun run --cwd frontend dev -- --port 9245 --host 127.0.0.1 || npm --prefix frontend run dev -- --port 9245 --host 127.0.0.1"
+      type: background
+    - cmd: "go build -o htmltoepdf"
+      type: blocking
+    - cmd: "./htmltoepdf"
+      type: primary

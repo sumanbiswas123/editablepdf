@@ -1,12 +1,10 @@
 package main
 
 import (
-	"context"
 	"embed"
+	"log"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 //go:embed all:frontend/dist
@@ -14,30 +12,42 @@ var assets embed.FS
 
 func main() {
 	// Create an instance of the app structure
-	app := NewApp()
+	appService := NewApp()
 
 	// Create application with options
+<<<<<<< HEAD
 	err := wails.Run(&options.App{
 		Title:  "htmltoepdf",
 		Width:  2048,
 		Height: 1536,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
+=======
+	app := application.New(application.Options{
+		Name: "htmltoepdf",
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
+>>>>>>> 53eff091e7320a5947094ffd318db4a2baf95108
 		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
-		OnShutdown: func(ctx context.Context) {
-			app.CleanUpServer()
+		Services: []application.Service{
+			application.NewService(appService),
 		},
-		Debug: options.Debug{
-			OpenInspectorOnStartup: false,
-		},
-		Bind: []interface{}{
-			app,
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
 
+	// Create window
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:  "htmltoepdf",
+		Width:  1024,
+		Height: 768,
+		BackgroundColour: application.RGBA{Red: 27, Green: 38, Blue: 54, Alpha: 255},
+	})
+
+	// Run the application
+	err := app.Run()
 	if err != nil {
-		println("Error:", err.Error())
+		log.Fatal("Error:", err.Error())
 	}
 }
