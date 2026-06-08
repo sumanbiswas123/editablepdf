@@ -10,13 +10,33 @@ tasks:
     summary: Builds the macOS application
     cmds:
       - task: frontend:build
-      - go build -o htmltoepdf
+      - go build -ldflags="-s -w" -o htmltoepdf
+
+  darwin:package:
+    summary: Packages the macOS application into htmltoepdf.app
+    cmds:
+      - task: darwin:build
+      - mkdir -p bin/htmltoepdf.app/Contents/MacOS
+      - mkdir -p bin/htmltoepdf.app/Contents/Resources
+      - cp htmltoepdf bin/htmltoepdf.app/Contents/MacOS/htmltoepdf
+      - cp build/darwin/Info.plist bin/htmltoepdf.app/Contents/Info.plist
+      - sed -i '' 's/{{printf "{{"}}.Info.ProductName}}/htmltoepdf/g' bin/htmltoepdf.app/Contents/Info.plist
+      - sed -i '' 's/{{printf "{{"}}.OutputFilename}}/htmltoepdf/g' bin/htmltoepdf.app/Contents/Info.plist
+      - sed -i '' 's/com.wails.{{printf "{{"}}.Name}}/com.nocodex.htmltoepdf/g' bin/htmltoepdf.app/Contents/Info.plist
+      - sed -i '' 's/{{printf "{{"}}.Info.ProductVersion}}/1.0.0/g' bin/htmltoepdf.app/Contents/Info.plist
+      - sed -i '' 's/{{printf "{{"}}.Info.Copyright}}/© 2026 NoCodex/g' bin/htmltoepdf.app/Contents/Info.plist
+      - sips -z 512 512 build/appicon.png --out /tmp/icon_tmp.png >/dev/null 2>&1 || true
+      - mkdir -p /tmp/htmltoepdf.iconset
+      - cp /tmp/icon_tmp.png /tmp/htmltoepdf.iconset/icon_512x512.png >/dev/null 2>&1 || true
+      - iconutil -c iconset -o bin/htmltoepdf.app/Contents/Resources/iconfile.icns /tmp/htmltoepdf.iconset >/dev/null 2>&1 || true
+      - rm -rf /tmp/htmltoepdf.iconset /tmp/icon_tmp.png
+      - echo "Mac application packaged successfully at bin/htmltoepdf.app"
 
   windows:build:
     summary: Builds the Windows application
     cmds:
       - task: frontend:build
-      - GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o htmltoepdf.exe
+      - GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -H=windowsgui" -o htmltoepdf.exe
 
   run:
     summary: Runs the application
