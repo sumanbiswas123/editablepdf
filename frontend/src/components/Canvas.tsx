@@ -95,7 +95,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const isVertical = !!(activeSlide.folderName && activeSlide.folderName.toLowerCase().includes('vertical'));
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = React.useState({ width: 2048, height: 1536 });
+  const [dimensions, setDimensions] = React.useState({ width: 1024, height: 768 });
 
   const [showBottomBar, setShowBottomBar] = React.useState(false);
   const thumbsContainerRef = React.useRef<HTMLDivElement>(null);
@@ -121,11 +121,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  const targetWidth = isVertical ? 1536 : 2048;
+  const targetWidth = isVertical ? 768 : 1024;
 
   // thumbWidth: paddingLeft(3) + 8×gap(20.625) + 8×tw = targetWidth
   // 3 + 165 + 8×tw = targetWidth → 168 + 8×tw = targetWidth → tw = (targetWidth−168)/8
-  // Works exactly: 2048→tw=107, 1536→tw=75 (both integers, zero gap/cut on right)
+  // Works exactly: 1024→tw=107, 768→tw=75 (both integers, zero gap/cut on right)
   const thumbWidth = Math.round((targetWidth - 168) / 8);
   const thumbHeight = Math.round(thumbWidth * 0.745);
 
@@ -232,7 +232,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => resizeObserver.disconnect();
   }, []);
 
-  const targetHeight = isVertical ? 2048 : 1536;
+  const targetHeight = isVertical ? 1024 : 768;
 
   // Sleek thin bezel width is 8px on each side (16px total)
   const bezelSize = 16;
@@ -744,7 +744,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               </div>
 
               {/* Pagination Dots Indicator */}
-              {totalPages > 1 && (
+              {totalPages >= 1 && (
                 <div style={{
                   display: 'flex',
                   justifyContent: 'center',

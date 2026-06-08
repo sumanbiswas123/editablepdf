@@ -1078,8 +1078,8 @@ func (a *App) CompileScreenshot(job ExportJob, outputPath string, sleepMs int) (
 	// Capture visual screenshot using chromedp
 	var buf []byte
 	err := chromedp.Run(ctx,
-		// Lock viewport to 2048x1536
-		emulation.SetDeviceMetricsOverride(2048, 1536, 1, false).
+		// Lock viewport to 1024x768
+		emulation.SetDeviceMetricsOverride(1024, 768, 1, false).
 			WithScreenOrientation(&emulation.ScreenOrientation{
 				Type:  emulation.OrientationTypeLandscapePrimary,
 				Angle: 90,
@@ -1207,15 +1207,15 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 		// Filepath to save individual page PDF
 		pdfPath := filepath.Join(tempDir, fmt.Sprintf("slide_%03d.pdf", idx))
 
-		// Execute page loading, locking 2048x1536 viewport, and printing to PDF
+		// Execute page loading, locking 1024x768 viewport, and printing to PDF
 		var buf []byte
 		var screenshotBuf []byte
 
 		actions := []chromedp.Action{
 			// Force screen media emulation to render screen-specific layouts, fonts, backgrounds, and pseudo-elements
 			emulation.SetEmulatedMedia().WithMedia("screen"),
-			// Lock viewport to 2048x1536 to prevent layout shifts
-			emulation.SetDeviceMetricsOverride(2048, 1536, 1, false).
+			// Lock viewport to 1024x768 to prevent layout shifts
+			emulation.SetDeviceMetricsOverride(1024, 768, 1, false).
 				WithScreenOrientation(&emulation.ScreenOrientation{
 					Type:  emulation.OrientationTypeLandscapePrimary,
 					Angle: 90,
@@ -1541,7 +1541,7 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 		actions = append(actions,
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				var err error
-				// Print to 10.66 x 8.00 in (perfect 2048x1536px at 96 DPI aspect ratio) with zero margins
+				// Print to 10.66 x 8.00 in (perfect 1024x768px at 96 DPI aspect ratio) with zero margins
 				buf, _, err = page.PrintToPDF().
 					WithPrintBackground(true).
 					WithPaperWidth(10.66).
@@ -1644,7 +1644,7 @@ func (a *App) CompileSlidesToIDML(jobs []ExportJob, outputPath string, sleepMs i
 		// Navigate, wait, settle, and run layout extraction script
 		var extractedJSON string
 		err := chromedp.Run(ctx,
-			emulation.SetDeviceMetricsOverride(2048, 1536, 1, false).
+			emulation.SetDeviceMetricsOverride(1024, 768, 1, false).
 				WithScreenOrientation(&emulation.ScreenOrientation{
 					Type:  emulation.OrientationTypeLandscapePrimary,
 					Angle: 90,

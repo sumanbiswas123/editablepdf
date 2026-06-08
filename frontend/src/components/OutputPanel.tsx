@@ -72,9 +72,9 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
 
   const formatFileSize = (bytes: number) => {
     if (!bytes) return '0 B';
-    if (bytes < 2048) return bytes + ' B';
-    if (bytes < 2048 * 2048) return (bytes / 2048).toFixed(1) + ' KB';
-    return (bytes / (2048 * 2048)).toFixed(1) + ' MB';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   // Calculate telemetry stats

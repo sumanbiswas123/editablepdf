@@ -980,7 +980,7 @@ export const App: React.FC = () => {
 
     // B. First Slide: Shared Overlays
     if (isFirstSlide) {
-      const sharedIds = ['pi', 'references', 'menu', 'flowSelector', 'email', 'objection', 'quickres'];
+      const sharedIds = ['pi', 'menu', 'flowSelector', 'email', 'objection', 'quickres'];
       for (const sid of sharedIds) {
         try {
           const isVisible = await executeInIframe(`(function() {
@@ -997,12 +997,8 @@ export const App: React.FC = () => {
 
           if (isVisible) {
             updateProgress(`🔗 Opening #${sid}...`);
-            if (sid === 'pi' || sid === 'references') {
-              await loadSlideInIframe();
-              await new Promise((r) => setTimeout(r, settleMs));
-            } else {
-              await ensureAllClosed();
-            }
+            await loadSlideInIframe();
+            await new Promise((r) => setTimeout(r, settleMs));
 
             await clickInIframe('#' + sid);
             await new Promise((r) => setTimeout(r, settleMs));
@@ -1016,40 +1012,6 @@ export const App: React.FC = () => {
           }
         } catch (_) {}
       }
-    } else {
-      // C. Non-First Slides: References popup
-      try {
-        const hasRef = await executeInIframe(`(function() {
-          var ref = document.querySelector('#references');
-          if (ref) {
-            var isInactive = ref.classList.contains('inactive') || ref.classList.contains('disabled');
-            var style = window.getComputedStyle(ref);
-            var isHidden = style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0' || parseFloat(style.opacity) < 0.5;
-            if (!isInactive && !isHidden) return 'nav';
-          }
-          var ref2 = document.querySelector('.gotoRef, [data-reftarget]');
-          if (!ref2) return false;
-          if (ref2.closest('.dialog') || ref2.closest('.ui-dialog')) return false;
-          return 'gotoRef';
-        })()`);
-
-        if (hasRef) {
-          updateProgress('📚 Opening references...');
-          await loadSlideInIframe();
-          await new Promise((r) => setTimeout(r, settleMs));
-
-          const refSelector = hasRef === 'nav' ? '#references' : '.gotoRef, [data-reftarget]';
-          await clickInIframe(refSelector);
-          await new Promise((r) => setTimeout(r, settleMs));
-
-          updateProgress('📸 Capturing references...');
-          await captureAndCompileState('References');
-          logLines.push(`📚 [${slide.name}] References`);
-
-          await closeIframeDialogs();
-          await new Promise((r) => setTimeout(r, 400));
-        }
-      } catch (_) {}
     }
 
     // D. Tabs and Internal switches crawling
@@ -1985,6 +1947,41 @@ export const App: React.FC = () => {
       } else {
         await scanAndProcessDialogs('Base Slide', null);
       }
+
+      // E. References popup (All Slides) - captured at the very end
+      try {
+        // Reload the main slide first to reset any active tabs/dialogs
+        await loadSlideInIframe();
+        await new Promise((r) => setTimeout(r, settleMs));
+
+        const hasRef = await executeInIframe(`(function() {
+          var ref = document.querySelector('#references');
+          if (ref) {
+            var isInactive = ref.classList.contains('inactive') || ref.classList.contains('disabled');
+            var style = window.getComputedStyle(ref);
+            var isHidden = style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0' || parseFloat(style.opacity) < 0.5;
+            if (!isInactive && !isHidden) return 'nav';
+          }
+          var ref2 = document.querySelector('.gotoRef, [data-reftarget]');
+          if (!ref2) return false;
+          if (ref2.closest('.dialog') || ref2.closest('.ui-dialog')) return false;
+          return 'gotoRef';
+        })()`);
+
+        if (hasRef) {
+          updateProgress('📚 Opening references...');
+          const refSelector = hasRef === 'nav' ? '#references' : '.gotoRef, [data-reftarget]';
+          await clickInIframe(refSelector);
+          await new Promise((r) => setTimeout(r, settleMs));
+
+          updateProgress('📸 Capturing references...');
+          await captureAndCompileState('References');
+          logLines.push(`📚 [${slide.name}] References`);
+
+          await closeIframeDialogs();
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      } catch (_) {}
     } catch (err) {
       console.warn(`Internal switch scanning failed for ${slide.name}:`, err);
     }
