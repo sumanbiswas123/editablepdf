@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Plus, Sparkles, BookOpen, Settings2, Trash2, Save, Play, GripVertical, FileText, Eye, FolderOpen, Edit3 } from 'lucide-react';
-import { SelectPDFFile, SplitCombinedPDFToPages, RebuildCombinedPDF, GetOutputDir, DeleteCompiledPDF, RenameCombinedPDF, OpenDirectory } from '../../wailsjs/go/main/App';
-import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
+import { SelectPDFFile, SplitCombinedPDFToPages, RebuildCombinedPDF, GetOutputDir, DeleteCompiledPDF, RenameCombinedPDF, OpenDirectory } from '../../bindings/htmltoepdf/app';
 
 interface CompiledPDF {
   name: string;

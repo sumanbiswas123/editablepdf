@@ -1,5 +1,5 @@
 import { FolderOpen, Sun, Moon, RefreshCw, Sliders, Cpu, Sparkles } from 'lucide-react';
-import { StartWSClient, StopWSClient, SelectDirectory } from '../../wailsjs/go/main/App';
+import { StartWSClient, StopWSClient, SelectDirectory } from '../../bindings/htmltoepdf/app';
 import React, { useState } from 'react';
 
 interface HeaderProps {
@@ -10,6 +10,7 @@ interface HeaderProps {
   theme: 'dark' | 'light';
   toggleTheme: () => void;
   onOpenStudio?: () => void;
+  appMode?: 'select' | 'builder' | 'capture';
 }
 
 
@@ -20,7 +21,8 @@ export const Header: React.FC<HeaderProps> = ({
   onSleepMsChange,
   theme,
   toggleTheme,
-  onOpenStudio
+  onOpenStudio,
+  appMode
 }) => {
   const [isMac] = useState<boolean>(() => typeof navigator !== 'undefined' && /Mac|Darwin/i.test(navigator.platform));
   const [wsRunning, setWsRunning] = useState(false);
@@ -225,7 +227,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Studio Mode Button */}
-      {isMac && (
+      {isMac && appMode === 'capture' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <select value={macMode} onChange={(e) => setMacMode(e.target.value)} style={{ height: '32px', borderRadius: '8px' }}>
             <option value="builder">Builder</option>

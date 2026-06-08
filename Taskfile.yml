@@ -1,0 +1,7 @@
+version: '3'
+
+tasks:
+  darwin:build:
+    summary: Builds the macOS application
+    cmds:
+      - go build -o htmltoepdf

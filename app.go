@@ -23,10 +23,163 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/gorilla/websocket"
 	"sync"
 )
+
+const shareHTMLPage = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download PDF - NoCodeX ePDF Studio</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --accent: #a855f7;
+            --blue: #3b82f6;
+            --text: #f3f4f6;
+            --text-dim: #9ca3af;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+            position: relative;
+        }
+        .bg-glow {
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(168,85,247,0.15) 0%, transparent 70%);
+            top: 10%;
+            left: 10%;
+            filter: blur(50px);
+            z-index: 1;
+        }
+        .bg-glow-2 {
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);
+            bottom: 10%;
+            right: 10%;
+            filter: blur(50px);
+            z-index: 1;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 40px;
+            width: 90%;
+            max-width: 380px;
+            text-align: center;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        .title {
+            font-size: 18px;
+            font-weight: 800;
+            margin: 0;
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #fff, var(--text-dim));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .filename {
+            font-size: 12px;
+            color: var(--text-dim);
+            word-break: break-all;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 8px 12px;
+            border-radius: 10px;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        .download-btn {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--blue));
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 24px rgba(168, 85, 247, 0.4);
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.3s;
+            position: relative;
+            outline: none;
+            margin: 10px 0;
+        }
+        .download-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 12px 30px rgba(168, 85, 247, 0.6);
+        }
+        .download-btn:active {
+            transform: scale(0.95);
+        }
+        .download-icon {
+            color: white;
+            width: 32px;
+            height: 32px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2.5;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            animation: bounce 2s infinite;
+        }
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(4px);
+            }
+        }
+        .footer {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.3);
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-glow"></div>
+    <div class="bg-glow-2"></div>
+    <div class="container">
+        <h2 class="title">NoCodeX ePDF Studio</h2>
+        <div class="filename">%s</div>
+        <a href="/output/%s?download=true" download class="download-btn" title="Download PDF">
+            <svg class="download-icon" viewBox="0 0 24 24">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+        </a>
+        <p class="footer">Stitched Presentation File Share</p>
+    </div>
+</body>
+</html>`
 
 // Slide represents a discovered slide
 type Slide struct {
@@ -47,6 +200,7 @@ type ScanResult struct {
 // App struct
 type App struct {
 	ctx        context.Context
+	app        *application.App
 	server     *http.Server
 	serverPort int
 	currentDir string
@@ -74,10 +228,20 @@ func NewApp() *App {
 	return &App{}
 }
 
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods
-func (a *App) startup(ctx context.Context) {
+// ServiceName returns the name of the service
+func (a *App) ServiceName() string {
+	return "App"
+}
+
+// ServiceStartup is called when the service starts
+func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	a.ctx = ctx
+	a.app = application.Get()
+	go func() {
+		<-ctx.Done()
+		a.CleanUpServer()
+	}()
+	return nil
 }
 
 // StartWSClient starts a WebSocket client that connects to the given server and room as a Mac role.
@@ -203,7 +367,7 @@ func (a *App) wsReadLoopForRoom(wsc *WSConnection, mode string) {
 			}
 		case "devices_list":
 			data, _ := msg["data"].(string)
-			wailsRuntime.EventsEmit(a.ctx, "devices_list_updated", map[string]interface{}{
+			a.app.Event.Emit( "devices_list_updated", map[string]interface{}{
 				"room": roomCode,
 				"data": data,
 			})
@@ -244,7 +408,7 @@ func (a *App) sendWSForRoom(room string, msg interface{}) error {
 }
 
 func (a *App) emitViewershipEvent(roomCode string, msg string) {
-	wailsRuntime.EventsEmit(a.ctx, "viewership_event", map[string]string{
+	a.app.Event.Emit( "viewership_event", map[string]string{
 		"room":    roomCode,
 		"message": msg,
 	})
@@ -356,9 +520,11 @@ func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{},
 
 // SelectDirectory triggers the folder selector dialog
 func (a *App) SelectDirectory() (string, error) {
-	dir, err := wailsRuntime.OpenDirectoryDialog(a.ctx, wailsRuntime.OpenDialogOptions{
-		Title: "Select eDA Presentation Root Directory",
-	})
+	dir, err := a.app.Dialog.OpenFile().
+		SetTitle("Select eDA Presentation Root Directory").
+		CanChooseDirectories(true).
+		CanChooseFiles(false).
+		PromptForSingleSelection()
 	if err != nil {
 		return "", err
 	}
@@ -452,6 +618,21 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Serve custom download landing page for shared links
+		if strings.HasPrefix(r.URL.Path, "/share/") {
+			filename := strings.TrimPrefix(r.URL.Path, "/share/")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			fmt.Fprintf(w, shareHTMLPage, filename, filename)
+			return
+		}
+
+		// Inject attachment header for download parameter
+		if strings.HasPrefix(r.URL.Path, "/output/") && r.URL.Query().Get("download") == "true" {
+			filename := filepath.Base(r.URL.Path)
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		}
+
 		// Prevent traversal attacks
 		cleanedPath := filepath.Clean(r.URL.Path)
 		fullPath := filepath.Join(dirPath, cleanedPath)
@@ -861,16 +1042,11 @@ func (a *App) CaptureCustomStateHTML(folderName string, htmlContent string) (str
 
 // SelectScreenshotSavePath triggers a native save file dialog for screenshots
 func (a *App) SelectScreenshotSavePath(defaultFilename string) (string, error) {
-	return wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
-		Title:           "Save Slide Screenshot",
-		DefaultFilename: defaultFilename,
-		Filters: []wailsRuntime.FileFilter{
-			{
-				DisplayName: "PNG Image (*.png)",
-				Pattern:     "*.png",
-			},
-		},
-	})
+	return a.app.Dialog.SaveFile().
+		SetMessage("Save Slide Screenshot").
+		SetFilename(defaultFilename).
+		AddFilter("PNG Image (*.png)", "*.png").
+		PromptForSingleSelection()
 }
 
 // CompileScreenshot exports a single slide visual screenshot to a PNG file
@@ -994,7 +1170,7 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 		if roomCode != "" {
 			progress["room"] = roomCode
 		}
-		wailsRuntime.EventsEmit(a.ctx, "compilation_progress", progress)
+		a.app.Event.Emit( "compilation_progress", progress)
 
 		renderUrl := job.URL
 		if a.currentDir != "" && a.serverPort != 0 {
@@ -1014,7 +1190,7 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 		if roomCode != "" {
 			a.emitViewershipEvent(roomCode, fmt.Sprintf("Navigating to URL: %s", renderUrl))
 		} else {
-			wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Navigating to URL: %s", renderUrl))
+			a.app.Event.Emit( "viewership_event", fmt.Sprintf("Navigating to URL: %s", renderUrl))
 		}
 
 		// If custom interactive state HTML is provided, write it temporarily
@@ -1410,7 +1586,7 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 	if roomCode != "" {
 		progressMerge["room"] = roomCode
 	}
-	wailsRuntime.EventsEmit(a.ctx, "compilation_progress", progressMerge)
+	a.app.Event.Emit( "compilation_progress", progressMerge)
 
 	err = api.MergeCreateFile(pdfPaths, outputPath, false, nil)
 	if err != nil {
@@ -1445,7 +1621,7 @@ func (a *App) CompileSlidesToIDML(jobs []ExportJob, outputPath string, sleepMs i
 	var idmlSlides []IDMLSlide
 
 	for idx, job := range jobs {
-		wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+		a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 			"current": idx + 1,
 			"total":   len(jobs),
 			"slide":   job.SlideName,
@@ -1575,7 +1751,7 @@ func (a *App) CompileSlidesToIDML(jobs []ExportJob, outputPath string, sleepMs i
 	}
 
 	// Emit status
-	wailsRuntime.EventsEmit(a.ctx, "compilation_progress", map[string]interface{}{
+	a.app.Event.Emit( "compilation_progress", map[string]interface{}{
 		"current": len(jobs),
 		"total":   len(jobs),
 		"slide":   "Packaging IDML file...",
@@ -1603,30 +1779,20 @@ func decodeJSON(r io.Reader, v interface{}) error {
 
 // SelectIDMLSavePath triggers a native save file dialog for IDMLs
 func (a *App) SelectIDMLSavePath(defaultFilename string) (string, error) {
-	return wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
-		Title:           "Save InDesign Interchange Package",
-		DefaultFilename: defaultFilename,
-		Filters: []wailsRuntime.FileFilter{
-			{
-				DisplayName: "InDesign Markup Language (*.idml)",
-				Pattern:     "*.idml",
-			},
-		},
-	})
+	return a.app.Dialog.SaveFile().
+		SetMessage("Save InDesign Interchange Package").
+		SetFilename(defaultFilename).
+		AddFilter("InDesign Markup Language (*.idml)", "*.idml").
+		PromptForSingleSelection()
 }
 
 // SelectSavePath triggers a native save file dialog
 func (a *App) SelectSavePath(defaultFilename string) (string, error) {
-	return wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
-		Title:           "Save Editable PDF",
-		DefaultFilename: defaultFilename,
-		Filters: []wailsRuntime.FileFilter{
-			{
-				DisplayName: "PDF Files (*.pdf)",
-				Pattern:     "*.pdf",
-			},
-		},
-	})
+	return a.app.Dialog.SaveFile().
+		SetMessage("Save Editable PDF").
+		SetFilename(defaultFilename).
+		AddFilter("PDF Files (*.pdf)", "*.pdf").
+		PromptForSingleSelection()
 }
 
 // CleanUpServer shuts down the local server when app closes
@@ -1822,27 +1988,27 @@ func UnzipBytes(zipBase64 string, destDir string) error {
 
 // handleSyncWorkspace processes the synced directory payload on macOS Performer.
 func (a *App) handleSyncWorkspace(zipBase64 string) {
-	wailsRuntime.EventsEmit(a.ctx, "viewership_event", "Syncing presentation workspace from Windows...")
+	a.app.Event.Emit( "viewership_event", "Syncing presentation workspace from Windows...")
 	tempDir, err := os.MkdirTemp("", "wails_mac_workspace_")
 	if err != nil {
-		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Workspace sync error: failed to create temp directory: %s", err.Error()))
+		a.app.Event.Emit( "viewership_event", fmt.Sprintf("Workspace sync error: failed to create temp directory: %s", err.Error()))
 		return
 	}
 
 	err = UnzipBytes(zipBase64, tempDir)
 	if err != nil {
-		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Workspace sync error: failed to extract files: %s", err.Error()))
+		a.app.Event.Emit( "viewership_event", fmt.Sprintf("Workspace sync error: failed to extract files: %s", err.Error()))
 		return
 	}
 
-	wailsRuntime.EventsEmit(a.ctx, "viewership_event", "Workspace synced. Starting local Performer HTTP server...")
+	a.app.Event.Emit( "viewership_event", "Workspace synced. Starting local Performer HTTP server...")
 	port, err := a.startLocalServer(tempDir)
 	if err != nil {
-		wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Workspace sync error: failed to start local HTTP server: %s", err.Error()))
+		a.app.Event.Emit( "viewership_event", fmt.Sprintf("Workspace sync error: failed to start local HTTP server: %s", err.Error()))
 		return
 	}
 
-	wailsRuntime.EventsEmit(a.ctx, "viewership_event", fmt.Sprintf("Performer HTTP server active locally on port %d", port))
+	a.app.Event.Emit( "viewership_event", fmt.Sprintf("Performer HTTP server active locally on port %d", port))
 }
 
 // ReadLocalFile reads a file from the local workspace directory and returns its base64 data and mime type.
@@ -1897,3 +2063,13 @@ func (a *App) ReadLocalFile(path string) (map[string]string, error) {
 	}, nil
 }
 
+// OpenBuilderWindow opens a new window specifically for Builder Mode
+func (a *App) OpenBuilderWindow() {
+	a.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:  "NoCodeX ePDF Studio - Builder Mode",
+		Width:  1024,
+		Height: 768,
+		URL:    "/?mode=builder",
+		BackgroundColour: application.RGBA{Red: 27, Green: 38, Blue: 54, Alpha: 255},
+	})
+}

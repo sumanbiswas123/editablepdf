@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { FileText, BookOpen, Trash2, Info, Merge, Eye, HardDrive, Cpu, Layers } from 'lucide-react';
+import { FileText, BookOpen, Trash2, Info, Merge, Eye, HardDrive, Cpu, Layers, Share2, Copy, Check, X } from 'lucide-react';
+import { ShareFile } from '../../bindings/htmltoepdf/app';
 
 interface Slide {
   name: string;
@@ -23,6 +24,8 @@ interface OutputPanelProps {
   onOpenPDFViewer: (pdf: CompiledPDF) => void;
   onOpenMetadata: (pdf: CompiledPDF) => void;
   isCompiling: boolean;
+  appMode?: 'select' | 'builder' | 'capture';
+  osPlatform?: 'darwin' | 'windows' | '' | null;
 }
 
 export const OutputPanel: React.FC<OutputPanelProps> = ({
@@ -34,7 +37,36 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
   onOpenPDFViewer,
   onOpenMetadata,
   isCompiling,
+  appMode,
+  osPlatform,
 }) => {
+  const [sharedUrl, setSharedUrl] = useState<string | null>(null);
+  const [sharedFileName, setSharedFileName] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const isMacBuilder = osPlatform === 'darwin' && appMode === 'builder';
+
+  const handleShareFile = async (e: React.MouseEvent, filename: string) => {
+    e.stopPropagation();
+    try {
+      const url = await ShareFile(filename);
+      setSharedUrl(url);
+      setSharedFileName(filename);
+      setCopied(false);
+    } catch (err) {
+      console.error('Failed to share file:', err);
+      alert('Failed to generate sharing link: ' + err);
+    }
+  };
+
+  const handleCopyLink = () => {
+    if (sharedUrl) {
+      navigator.clipboard.writeText(sharedUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   const singles = compiledPDFs || [];
   const decks = combinedDecks || [];
 
@@ -224,6 +256,30 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
                     </span>
                     
                     <div style={{ display: 'flex', gap: '6px' }}>
+                      {isMacBuilder && (
+                        <button
+                          onClick={(e) => handleShareFile(e, pdf.name)}
+                          title="Share File to Network"
+                          style={{
+                            background: 'var(--bg-elevated)',
+                            border: '1px solid var(--border-2)',
+                            color: 'var(--text-2)',
+                            cursor: 'pointer',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '9px',
+                            fontWeight: 700,
+                            transition: 'all 0.2s'
+                          }}
+                          className="feed-action-btn"
+                        >
+                          <Share2 size={10} />
+                          Share
+                        </button>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); onOpenMetadata(pdf); }}
                         title="Properties Info"
@@ -411,6 +467,30 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
                     </span>
                     
                     <div style={{ display: 'flex', gap: '6px' }}>
+                      {isMacBuilder && (
+                        <button
+                          onClick={(e) => handleShareFile(e, pdf.name)}
+                          title="Share File to Network"
+                          style={{
+                            background: 'var(--bg-elevated)',
+                            border: '1px solid var(--border-2)',
+                            color: 'var(--text-2)',
+                            cursor: 'pointer',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '9px',
+                            fontWeight: 700,
+                            transition: 'all 0.2s'
+                          }}
+                          className="feed-action-btn"
+                        >
+                          <Share2 size={10} />
+                          Share
+                        </button>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); onOpenMetadata(pdf); }}
                         title="Properties Info"
@@ -465,6 +545,143 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
         </div>
       </div>
 
+      {sharedUrl && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(10px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '24px'
+        }}>
+          <div style={{
+            background: 'var(--bg-base)',
+            border: '1px solid var(--border-accent)',
+            borderRadius: '16px',
+            padding: '24px',
+            width: '100%',
+            maxWidth: '420px',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            position: 'relative'
+          }}>
+            <button
+              onClick={() => setSharedUrl(null)}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                right: '16px',
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-3)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px',
+                borderRadius: '50%',
+                transition: 'background-color 0.2s'
+              }}
+              className="hover-bg-raised"
+            >
+              <X size={16} />
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '10px',
+                backgroundColor: 'var(--accent-dim)',
+                border: '1px solid var(--border-accent)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--accent)'
+              }}>
+                <Share2 size={16} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 800, color: 'var(--text-1)' }}>
+                  Share File to Local Network
+                </h3>
+                <p style={{ margin: '2px 0 0 0', fontSize: '10px', color: 'var(--text-3)', fontWeight: 600 }}>
+                  Instantly shared from this Mac
+                </p>
+              </div>
+            </div>
+
+            <div style={{
+              backgroundColor: 'var(--bg-raised)',
+              border: '1px solid var(--border-1)',
+              padding: '12px',
+              borderRadius: '8px',
+              fontSize: '11px',
+              color: 'var(--text-2)',
+              wordBreak: 'break-all',
+              fontFamily: 'var(--font-mono)'
+            }}>
+              <strong>File:</strong> {sharedFileName}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-3)', letterSpacing: '0.5px' }}>
+                RECEIVE LINK (ANY BROWSER ON SAME WI-FI / LAN):
+              </span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  readOnly
+                  value={sharedUrl}
+                  style={{
+                    flex: 1,
+                    backgroundColor: 'var(--bg-deep)',
+                    border: '1px solid var(--border-2)',
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    fontSize: '11px',
+                    color: 'var(--text-1)',
+                    fontFamily: 'var(--font-mono)',
+                    outline: 'none'
+                  }}
+                />
+                <button
+                  onClick={handleCopyLink}
+                  style={{
+                    backgroundColor: copied ? 'var(--success)' : 'var(--accent)',
+                    border: 'none',
+                    color: '#fff',
+                    borderRadius: '8px',
+                    padding: '0 16px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {copied ? <Check size={12} /> : <Copy size={12} />}
+                  <span>{copied ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '10px', color: 'var(--text-3)', lineHeight: 1.5, textAlign: 'center' }}>
+              Ensure the receiving device is connected to the same Wi-Fi network. Just type or paste this link in any web browser to view or download the PDF file directly.
+            </p>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );
