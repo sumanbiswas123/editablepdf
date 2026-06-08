@@ -1,7 +1,19 @@
 version: '3'
 
 tasks:
+  frontend:build:
+    summary: Builds the frontend assets
+    cmds:
+      - bun run --cwd frontend build || npm run --prefix frontend build
+
   darwin:build:
     summary: Builds the macOS application
     cmds:
+      - task: frontend:build
       - go build -o htmltoepdf
+
+  windows:build:
+    summary: Builds the Windows application
+    cmds:
+      - task: frontend:build
+      - GOOS=windows GOARCH=amd64 go build -o htmltoepdf.exe
