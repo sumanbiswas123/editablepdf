@@ -6,6 +6,15 @@ tasks:
     cmds:
       - bun run --cwd frontend build || npm run --prefix frontend build
 
+  build:
+    summary: Builds the application for the current platform
+    cmds:
+      - task: frontend:build
+      - cmd: go build -ldflags="-s -w" -o htmltoepdf
+        platforms: [darwin, linux]
+      - cmd: go build -ldflags="-s -w -H=windowsgui" -o htmltoepdf.exe
+        platforms: [windows]
+
   darwin:build:
     summary: Builds the macOS application
     cmds:
