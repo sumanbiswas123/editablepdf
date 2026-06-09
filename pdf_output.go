@@ -1119,6 +1119,19 @@ func (a *App) AutomateDeck(sleepMs int) (string, error) {
 		return slides[i].Name < slides[j].Name
 	})
 
+	// Load description.json if it exists and apply descriptions to sorted slides
+	descPath := filepath.Join(a.currentDir, "description.json")
+	if descData, err := os.ReadFile(descPath); err == nil {
+		var descriptions []string
+		if err := json.Unmarshal(descData, &descriptions); err == nil && len(descriptions) > 0 {
+			for i := 0; i < len(slides); i++ {
+				if i < len(descriptions) {
+					slides[i].Name = descriptions[i]
+				}
+			}
+		}
+	}
+
 	if len(slides) == 0 {
 		return "", fmt.Errorf("no slides found to compile")
 	}
@@ -2018,6 +2031,19 @@ func (a *App) AutomateActiveSlide(slideFolder string, sleepMs int) (string, erro
 		return slides[i].Name < slides[j].Name
 	})
 
+	// Load description.json if it exists and apply descriptions to sorted slides
+	descPath := filepath.Join(a.currentDir, "description.json")
+	if descData, err := os.ReadFile(descPath); err == nil {
+		var descriptions []string
+		if err := json.Unmarshal(descData, &descriptions); err == nil && len(descriptions) > 0 {
+			for i := 0; i < len(slides); i++ {
+				if i < len(descriptions) {
+					slides[i].Name = descriptions[i]
+				}
+			}
+		}
+	}
+
 	slideIdx := -1
 	var targetSlide Slide
 	for idx, s := range slides {
@@ -2615,6 +2641,19 @@ func (a *App) ScanActiveSlide(slideFolder string) ([]string, error) {
 		}
 		return slides[i].Name < slides[j].Name
 	})
+
+	// Load description.json if it exists and apply descriptions to sorted slides
+	descPath := filepath.Join(a.currentDir, "description.json")
+	if descData, err := os.ReadFile(descPath); err == nil {
+		var descriptions []string
+		if err := json.Unmarshal(descData, &descriptions); err == nil && len(descriptions) > 0 {
+			for i := 0; i < len(slides); i++ {
+				if i < len(descriptions) {
+					slides[i].Name = descriptions[i]
+				}
+			}
+		}
+	}
 
 	slideIdx := -1
 	var targetSlide Slide

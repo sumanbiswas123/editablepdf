@@ -594,6 +594,19 @@ func (a *App) ScanAndStartServer(dirPath string) (*ScanResult, error) {
 		return slides[i].Name < slides[j].Name
 	})
 
+	// Load description.json if it exists and apply descriptions to sorted slides
+	descPath := filepath.Join(dirPath, "description.json")
+	if descData, err := os.ReadFile(descPath); err == nil {
+		var descriptions []string
+		if err := json.Unmarshal(descData, &descriptions); err == nil && len(descriptions) > 0 {
+			for i := 0; i < len(slides); i++ {
+				if i < len(descriptions) {
+					slides[i].Name = descriptions[i]
+				}
+			}
+		}
+	}
+
 	return &ScanResult{
 		ParentPath: dirPath,
 		Slides:     slides,
