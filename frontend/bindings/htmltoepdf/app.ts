@@ -384,6 +384,10 @@ export function RestartRoomTimer(room: string): $CancellablePromise<string> {
     return $Call.ByName("main.App.RestartRoomTimer", room);
 }
 
+export function GetSystemUsername(): $CancellablePromise<string> {
+    return $Call.ByName("main.App.GetSystemUsername");
+}
+
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
 const $$createType1 = $models.CompiledPDF.createFrom;
