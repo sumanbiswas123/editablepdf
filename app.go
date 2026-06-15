@@ -657,6 +657,19 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
 		cleanedPath := filepath.Clean(r.URL.Path)
 		fullPath := filepath.Join(dirPath, cleanedPath)
 
+		// If the requested file doesn't exist, check if stripping the first folder segment works
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			parts := strings.Split(strings.TrimPrefix(cleanedPath, "/"), "/")
+			if len(parts) > 1 {
+				altPath := filepath.Join(dirPath, filepath.Join(parts[1:]...))
+				if _, errAlt := os.Stat(altPath); errAlt == nil {
+					r.URL.Path = "/" + strings.Join(parts[1:], "/")
+					cleanedPath = filepath.Clean(r.URL.Path)
+					fullPath = altPath
+				}
+			}
+		}
+
 		// Check if it's a directory
 		stat, err := os.Stat(fullPath)
 		if err == nil && stat.IsDir() {
@@ -2040,6 +2053,18 @@ func (a *App) ReadLocalFile(path string) (map[string]string, error) {
 
 	fullPath := filepath.Join(a.currentDir, path)
 	cleanedPath := filepath.Clean(fullPath)
+
+	// If the file doesn't exist, check if stripping the first folder segment works
+	if _, err := os.Stat(cleanedPath); os.IsNotExist(err) {
+		parts := strings.Split(strings.TrimPrefix(filepath.ToSlash(path), "/"), "/")
+		if len(parts) > 1 {
+			altPath := filepath.Join(a.currentDir, filepath.Join(parts[1:]...))
+			if _, errAlt := os.Stat(altPath); errAlt == nil {
+				cleanedPath = altPath
+			}
+		}
+	}
+
 	if !strings.HasPrefix(cleanedPath, filepath.Clean(a.currentDir)) {
 		return nil, fmt.Errorf("forbidden path traversal detected")
 	}
