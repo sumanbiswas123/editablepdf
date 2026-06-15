@@ -3597,10 +3597,25 @@ export const App: React.FC = () => {
               <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>
                 Safari Link: {wsConnectionState === 'connected' ? `Connected to Mac (${targetMacIP})` : 'Disconnected'}
               </span>
-              {wsConnectionState === 'connected' && controllerRoomCreatedAt && (
+              <button 
+                onClick={() => setWsConnectionState('disconnected')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--rose)',
+                  fontSize: '10px',
+                  cursor: 'pointer',
+                  marginLeft: '8px',
+                  fontWeight: 700
+                }}
+              >
+                Disconnect
+              </button>
+              {wsConnectionState === 'connected' && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '12px', borderLeft: '1px solid var(--border-1)', paddingLeft: '12px' }}>
                   <span style={{ color: '#38bdf8', fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}>
                     ⏳ {(() => {
+                      if (!controllerRoomCreatedAt) return "3h 00m";
                       const created = new Date(controllerRoomCreatedAt).getTime();
                       const expires = created + 3 * 60 * 60 * 1000;
                       const diff = expires - Date.now();
@@ -3639,20 +3654,6 @@ export const App: React.FC = () => {
                   </button>
                 </div>
               )}
-              <button 
-                onClick={() => setWsConnectionState('disconnected')}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--rose)',
-                  fontSize: '10px',
-                  cursor: 'pointer',
-                  marginLeft: '8px',
-                  fontWeight: 700
-                }}
-              >
-                Disconnect
-              </button>
             </div>
           )}
         </div>
