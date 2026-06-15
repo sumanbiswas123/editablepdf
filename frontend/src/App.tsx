@@ -155,6 +155,7 @@ export const App: React.FC = () => {
   const [targetMacCode, setTargetMacCode] = useState(() => localStorage.getItem('capture-mac-code') || '');
   const [controllerWS, setControllerWS] = useState<WebSocket | null>(null);
   const [wsConnectionState, setWsConnectionState] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [controllerRoomCreatedAt, setControllerRoomCreatedAt] = useState<string | null>(null);
   const [windowsIP, setWindowsIP] = useState('');
   const pendingCleanupsRef = useRef<{ folder: string; file: string }[]>([]);
   const initializedRef = useRef(false);
@@ -2058,6 +2059,11 @@ export const App: React.FC = () => {
     ws.onmessage = async (event) => {
       try {
         const msg = JSON.parse(event.data);
+        if (msg.type === 'room_info') {
+          setControllerRoomCreatedAt(msg.data);
+          return;
+        }
+
         setCompilationProgress(prev => prev ? {
           ...prev,
           detail: `Received WS packet of type: ${msg.type || 'unknown'}`
@@ -2098,10 +2104,10 @@ export const App: React.FC = () => {
 
           setTimeout(async () => {
             setIsCompiling(false);
-            setIsSingleSave(false);
             setCompilationProgress(null);
+            setIsSingleSave(false);
             await refreshPDFList();
-          }, 1500);
+          }, 3000);
         } else if (msg.type === 'error') {
           setIsCompiling(false);
           setIsSingleSave(false);
@@ -2150,12 +2156,14 @@ export const App: React.FC = () => {
     ws.onclose = () => {
       setWsConnectionState('disconnected');
       setControllerWS(null);
+      setControllerRoomCreatedAt(null);
     };
 
     ws.onerror = (err) => {
       console.error("WS error:", err);
       setWsConnectionState('disconnected');
       setControllerWS(null);
+      setControllerRoomCreatedAt(null);
       showModal("Connection Failed", "Failed to connect to Mac Viewership. Please verify the IP Address, pairing code, and network connection.", "error");
     };
   };
@@ -3587,15 +3595,57 @@ export const App: React.FC = () => {
               <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>
                 Safari Link: {wsConnectionState === 'connected' ? `Connected to Mac (${targetMacIP})` : 'Disconnected'}
               </span>
+              {wsConnectionState === 'connected' && controllerRoomCreatedAt && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '12px', borderLeft: '1px solid var(--border-1)', paddingLeft: '12px' }}>
+                  <span style={{ color: '#38bdf8', fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}>
+                    ⏳ {(() => {
+                      const created = new Date(controllerRoomCreatedAt).getTime();
+                      const expires = created + 3 * 60 * 60 * 1000;
+                      const diff = expires - Date.now();
+                      if (diff <= 0) return "EXPIRED";
+                      const totalSecs = Math.floor(diff / 1000);
+                      if (totalSecs < 60) {
+                        return `${totalSecs}s`;
+                      }
+                      const h = Math.floor(totalSecs / 3600);
+                      const m = Math.floor((totalSecs % 3600) / 60);
+                      if (h > 0) {
+                        return `${h}h ${m.toString().padStart(2, '0')}m`;
+                      }
+                      return `${m}m`;
+                    })()}
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (controllerWS && controllerWS.readyState === 1) {
+                        controllerWS.send(JSON.stringify({ type: 'extend_session' }));
+                      }
+                    }}
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.1)',
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      color: '#38bdf8',
+                      fontSize: '9px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      textTransform: 'uppercase'
+                    }}
+                  >
+                    Extend Session
+                  </button>
+                </div>
+              )}
               <button 
                 onClick={() => setWsConnectionState('disconnected')}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: 'var(--accent)',
+                  color: 'var(--rose)',
                   fontSize: '10px',
                   cursor: 'pointer',
-                  marginLeft: '4px',
+                  marginLeft: '8px',
                   fontWeight: 700
                 }}
               >
