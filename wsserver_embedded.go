@@ -237,6 +237,10 @@ func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	room.notifyOwnerOfClients()
 
+	if s.app != nil {
+		s.app.emitViewershipEvent(room.id, fmt.Sprintf("Device joined room: %s (role: %s)", client.id[:8], role))
+	}
+
 	// Send initial room timer info to the newly connected client
 	client.send <- WSMessage{
 		Type:   "room_info",
@@ -296,6 +300,7 @@ func (c *WSClient) readPump() {
 			}
 		case "request_room_info":
 			if c.room != nil {
+				log.Printf("[WSServer] Client %s requested room info for room %s (createdAt: %s)", c.id[:8], c.room.id, c.room.createdAt.Format(time.RFC3339))
 				c.send <- WSMessage{
 					Type:   "room_info",
 					Data:   c.room.createdAt.Format(time.RFC3339),
