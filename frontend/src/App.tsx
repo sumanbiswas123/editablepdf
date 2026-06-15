@@ -2050,18 +2050,22 @@ export const App: React.FC = () => {
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+      console.log("WS Windows: Connection opened to Mac Performer.");
       setWsConnectionState('connected');
       setControllerWS(ws);
       localStorage.setItem('capture-mac-ip', ip);
       localStorage.setItem('capture-mac-code', code);
       // Explicitly request room info upon connection open
+      console.log("WS Windows: Requesting room info...");
       ws.send(JSON.stringify({ type: 'request_room_info' }));
     };
 
     ws.onmessage = async (event) => {
       try {
+        console.log("WS Windows: Received raw message data:", event.data);
         const msg = JSON.parse(event.data);
         if (msg.type === 'room_info') {
+          console.log("WS Windows: Successfully set room createdAt time:", msg.data);
           setControllerRoomCreatedAt(msg.data);
           return;
         }
