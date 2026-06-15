@@ -372,6 +372,18 @@ export const App: React.FC = () => {
         }
       });
 
+      const destroyRoomTimerUpdatedEvent = safeEventsOn('room_timer_updated', (eventData: any) => {
+        const room = eventData?.room || "";
+        const data = eventData?.data || "";
+        if (room && data) {
+          setDeviceRooms(prev => prev.map(r => r.code === room ? {
+            ...r,
+            createdAt: data,
+            logs: [...r.logs, `[${new Date().toLocaleTimeString()}] Room timer updated by peer request.`]
+          } : r));
+        }
+      });
+
       return () => {
         isStopped = true;
         StopWSClient();
@@ -386,6 +398,9 @@ export const App: React.FC = () => {
         }
         if (typeof destroyRoomClosedEvent === 'function') {
           destroyRoomClosedEvent();
+        }
+        if (typeof destroyRoomTimerUpdatedEvent === 'function') {
+          destroyRoomTimerUpdatedEvent();
         }
       };
     }

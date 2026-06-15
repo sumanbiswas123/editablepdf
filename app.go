@@ -371,6 +371,12 @@ func (a *App) wsReadLoopForRoom(wsc *WSConnection, mode string) {
 				"room": roomCode,
 				"data": data,
 			})
+		case "room_info":
+			data, _ := msg["data"].(string)
+			a.app.Event.Emit("room_timer_updated", map[string]interface{}{
+				"room": roomCode,
+				"data": data,
+			})
 		}
 	}
 }
@@ -1813,6 +1819,7 @@ func (a *App) CleanUpServer() {
 	if a.server != nil {
 		a.server.Shutdown(context.Background())
 	}
+	a.CleanUpEmbeddedWSServer()
 }
 
 // GetAssetBase64 reads an asset image and returns it as a Base64 data URI

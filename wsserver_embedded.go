@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -257,11 +258,48 @@ func (c *WSClient) readPump() {
 		if c.room != nil {
 			c.room.mu.Lock()
 			delete(c.room.clients, c.id)
-			if c.room.owner == c.id {
+			isOwner := c.room.owner == c.id
+			if isOwner {
 				c.room.owner = ""
 			}
 			c.room.mu.Unlock()
 			c.room.notifyOwnerOfClients()
+
+			if isOwner {
+				if c.srv != nil {
+					c.srv.mu.Lock()
+					delete(c.srv.rooms, c.room.id)
+					if len(c.srv.rooms) == 0 {
+						newRoomID := c.srv.generateRoomIDNoLock()
+						newRoom := &WSRoom{
+							id:        newRoomID,
+							clients:   make(map[string]*WSClient),
+							srv:       c.srv,
+							createdAt: time.Now(),
+						}
+						c.srv.rooms[newRoomID] = newRoom
+						log.Printf("[WSServer] Auto-created new room %s after owner disconnected because it was the only room.", newRoomID)
+						if c.srv.app != nil && c.srv.app.app != nil {
+							c.srv.app.app.Event.Emit("room_timeout_recreate", map[string]string{
+								"oldRoom": c.room.id,
+								"newRoom": newRoomID,
+							})
+							c.srv.app.emitViewershipEvent(c.room.id, fmt.Sprintf("Room %s closed by owner. Auto-created new Room %s.", c.room.id, newRoomID))
+						}
+					}
+					c.srv.mu.Unlock()
+				}
+				c.room.mu.Lock()
+				for _, client := range c.room.clients {
+					_ = client.conn.WriteJSON(WSMessage{
+						Type: "error",
+						Data: "The room owner has disconnected. Room closed.",
+					})
+					_ = client.conn.Close()
+				}
+				c.room.clients = make(map[string]*WSClient)
+				c.room.mu.Unlock()
+			}
 		}
 		if c.srv != nil {
 			c.srv.mu.Lock()
@@ -536,9 +574,10 @@ func (s *WSServer) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 // Bindable WS actions in App
 var (
-	embeddedServer   *WSServer
-	embeddedServerMu sync.Mutex
-	serverStarted    bool
+	embeddedServer     *WSServer
+	embeddedServerMu   sync.Mutex
+	serverStarted      bool
+	embeddedHTTPServer *http.Server
 )
 
 func (s *WSServer) startTimeoutChecker() {
@@ -665,15 +704,32 @@ func (a *App) StartEmbeddedWSServer() string {
 	mux.HandleFunc("/ws", embeddedServer.handleWS)
 	mux.HandleFunc("/proxy/", embeddedServer.handleProxyRequest)
 
+	embeddedHTTPServer = &http.Server{
+		Addr:    ":8081",
+		Handler: mux,
+	}
+
 	go func() {
 		log.Println("Embedded WebSocket Server running on :8081")
-		if err := http.ListenAndServe(":8081", mux); err != nil {
+		if err := embeddedHTTPServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Println("Embedded server ListenAndServe error:", err)
 		}
 	}()
 
 	serverStarted = true
 	return "Started"
+}
+
+// CleanUpEmbeddedWSServer shuts down the embedded websocket server
+func (a *App) CleanUpEmbeddedWSServer() {
+	embeddedServerMu.Lock()
+	defer embeddedServerMu.Unlock()
+	if embeddedHTTPServer != nil {
+		log.Println("Shutting down Embedded WebSocket Server on :8081...")
+		embeddedHTTPServer.Shutdown(context.Background())
+		embeddedHTTPServer = nil
+	}
+	serverStarted = false
 }
 
 // GetPlatform returns the current operating system (windows, darwin, etc)
