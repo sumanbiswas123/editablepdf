@@ -161,6 +161,20 @@ export const App: React.FC = () => {
   const pendingCleanupsRef = useRef<{ folder: string; file: string }[]>([]);
   const initializedRef = useRef(false);
 
+  const autoScrollRef = (el: HTMLDivElement | null) => {
+    if (el) {
+      if ((el as any)._observer) {
+        (el as any)._observer.disconnect();
+      }
+      const observer = new MutationObserver(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      });
+      observer.observe(el, { childList: true, subtree: true });
+      (el as any)._observer = observer;
+      el.scrollTop = el.scrollHeight;
+    }
+  };
+
   // Logs for Mac Viewership Console
   const [viewershipLogs, setViewershipLogs] = useState<string[]>([]);
 
@@ -379,8 +393,7 @@ export const App: React.FC = () => {
         if (room && data) {
           setDeviceRooms(prev => prev.map(r => r.code === room ? {
             ...r,
-            createdAt: data,
-            logs: [...r.logs, `[${new Date().toLocaleTimeString()}] Room timer updated by peer request.`]
+            createdAt: data
           } : r));
         }
       });
@@ -3033,8 +3046,7 @@ export const App: React.FC = () => {
                         if (res === "Success") {
                           setDeviceRooms(prev => prev.map(r => r.code === room.code ? {
                             ...r,
-                            createdAt: new Date().toISOString(),
-                            logs: [...r.logs, `[${new Date().toLocaleTimeString()}] Room timer manual restart. Resetting 3-hour limit.`]
+                            createdAt: new Date().toISOString()
                           } : r));
                         } else {
                           showModal("Error", `Failed to restart room timer: ${res}`, "error");
@@ -3111,17 +3123,51 @@ export const App: React.FC = () => {
                 <span style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 800, letterSpacing: '2px', textTransform: 'uppercase' }}>
                   Pairing Passcode
                 </span>
-                <span style={{
-                  fontSize: '40px',
-                  fontWeight: 900,
-                  color: '#ffffff',
-                  fontFamily: 'var(--font-mono)',
-                  letterSpacing: '6px',
-                  lineHeight: '1.1',
-                  textShadow: '0 0 30px rgba(0, 242, 254, 0.35), 0 0 10px rgba(0, 242, 254, 0.15)'
-                }}>
-                  {room.code}
-                </span>
+                {room.clients.length > 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px', marginTop: '4px' }}>
+                    {/* Passcode on Left */}
+                    <span style={{
+                      fontSize: '40px',
+                      fontWeight: 900,
+                      color: '#ffffff',
+                      fontFamily: 'var(--font-mono)',
+                      letterSpacing: '6px',
+                      lineHeight: '1.1',
+                      textShadow: '0 0 30px rgba(0, 242, 254, 0.35), 0 0 10px rgba(0, 242, 254, 0.15)'
+                    }}>
+                      {room.code}
+                    </span>
+                    {/* Vertical Divider */}
+                    <div style={{ height: '32px', width: '1px', backgroundColor: 'rgba(255, 255, 255, 0.15)' }} />
+                    {/* Connected User Name on Right */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                      <span style={{ fontSize: '9px', color: '#38bdf8', fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase' }}>
+                        Connected User
+                      </span>
+                      <span style={{
+                        fontSize: '20px',
+                        fontWeight: 800,
+                        color: '#ffffff',
+                        letterSpacing: '0.5px',
+                        lineHeight: '1.2'
+                      }}>
+                        {room.clients[0]}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <span style={{
+                    fontSize: '40px',
+                    fontWeight: 900,
+                    color: '#ffffff',
+                    fontFamily: 'var(--font-mono)',
+                    letterSpacing: '6px',
+                    lineHeight: '1.1',
+                    textShadow: '0 0 30px rgba(0, 242, 254, 0.35), 0 0 10px rgba(0, 242, 254, 0.15)'
+                  }}>
+                    {room.code}
+                  </span>
+                )}
                 {room.createdAt && (
                   <span style={{
                     fontSize: '10.5px',
@@ -3173,16 +3219,18 @@ export const App: React.FC = () => {
                 }}>
                   Live Output Feed
                 </div>
-                <div style={{
-                  flex: 1,
-                  padding: '16px 20px',
-                  overflowY: 'auto',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                  boxShadow: 'inset 0 10px 20px rgba(0,0,0,0.15)'
-                }}>
+                <div 
+                  ref={autoScrollRef}
+                  style={{
+                    flex: 1,
+                    padding: '16px 20px',
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+                    boxShadow: 'inset 0 10px 20px rgba(0,0,0,0.15)'
+                  }}>
                   {(() => {
                     const parseLogsToSteps = (logs: string[]) => {
                       return logs.map(log => {
