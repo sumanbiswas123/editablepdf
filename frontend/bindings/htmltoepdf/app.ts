@@ -380,6 +380,10 @@ export function SyncWorkspaceToMac(): $CancellablePromise<string> {
     return $Call.ByID(330759889);
 }
 
+export function RestartRoomTimer(room: string): $CancellablePromise<string> {
+    return $Call.ByName("main.App.RestartRoomTimer", room);
+}
+
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
 const $$createType1 = $models.CompiledPDF.createFrom;

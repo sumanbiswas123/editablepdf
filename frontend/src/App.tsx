@@ -38,7 +38,8 @@ import {
   CleanUpTempHTML,
   SyncWorkspaceToMac,
   ReadLocalFile,
-  OpenBuilderWindow
+  OpenBuilderWindow,
+  RestartRoomTimer
 } from '../bindings/htmltoepdf/app';
 
 import { Events } from '@wailsio/runtime';
@@ -109,8 +110,17 @@ export const App: React.FC = () => {
     status: string;
     logs: string[];
     clients: string[];
+    createdAt?: string;
   }
   const [deviceRooms, setDeviceRooms] = useState<DeviceRoom[]>(() => globalDeviceRooms);
+
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTick(t => t + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [genericModal, setGenericModal] = useState<{
     title: string;
     message: string;
@@ -193,11 +203,18 @@ export const App: React.FC = () => {
     detect();
   }, []);
 
+  const MAX_ROOMS = 10;
+
   const addDeviceRoom = async () => {
+    if (deviceRooms.length >= MAX_ROOMS) {
+      showModal("Limit Reached", `Maximum room limit of ${MAX_ROOMS} rooms reached.`, "error");
+      return;
+    }
     try {
       const res = await fetch('http://127.0.0.1:8081/create-room');
       const data = await res.json();
       const code = data.room;
+      const createdAt = data.createdAt || new Date().toISOString();
 
       setDeviceRooms(prev => [
         ...prev,
@@ -205,7 +222,8 @@ export const App: React.FC = () => {
           code,
           status: 'Listening',
           logs: [`[${new Date().toLocaleTimeString()}] Room ${code} created. Listening for controllers...`],
-          clients: []
+          clients: [],
+          createdAt
         }
       ]);
 
@@ -233,10 +251,8 @@ export const App: React.FC = () => {
 
   // Initialize Mac Performer Mode
   useEffect(() => {
+    let isStopped = false;
     if (appMode === 'capture' && osPlatform === 'darwin') {
-      if (initializedRef.current) return;
-      initializedRef.current = true;
-      let isStopped = false;
       const initMacPerformer = async () => {
         try {
           await StartEmbeddedWSServer();
@@ -251,11 +267,13 @@ export const App: React.FC = () => {
                 const res = await fetch('http://127.0.0.1:8081/create-room');
                 const data = await res.json();
                 const code = data.room;
+                const createdAt = data.createdAt || new Date().toISOString();
                 const newRoom = {
                   code,
                   status: 'Listening',
                   logs: [`[${new Date().toLocaleTimeString()}] Room ${code} created. Listening for controllers...`],
-                  clients: []
+                  clients: [],
+                  createdAt
                 };
                 globalDeviceRooms = [newRoom];
                 await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
@@ -328,6 +346,31 @@ export const App: React.FC = () => {
         } catch (_) {}
       });
 
+      const destroyRoomTimeoutEvent = safeEventsOn('room_timeout_recreate', (eventData: any) => {
+        const oldRoom = eventData?.oldRoom || "";
+        const newRoom = eventData?.newRoom || "";
+        if (oldRoom && newRoom) {
+          StopWSClientForRoom(oldRoom).catch(console.error);
+          setDeviceRooms(prev => prev.map(r => r.code === oldRoom ? {
+            ...r,
+            code: newRoom,
+            status: 'Listening',
+            logs: [`[${new Date().toLocaleTimeString()}] Room ${newRoom} created (Auto-recreated from ${oldRoom}). Listening for controllers...`],
+            clients: [],
+            createdAt: new Date().toISOString()
+          } : r));
+          StartWSClient("ws://127.0.0.1:8081/ws", newRoom, "capture").catch(console.error);
+        }
+      });
+
+      const destroyRoomClosedEvent = safeEventsOn('room_closed_by_timeout', (eventData: any) => {
+        const room = eventData?.room || "";
+        if (room) {
+          StopWSClientForRoom(room).catch(console.error);
+          setDeviceRooms(prev => prev.filter(r => r.code !== room));
+        }
+      });
+
       return () => {
         isStopped = true;
         StopWSClient();
@@ -336,6 +379,12 @@ export const App: React.FC = () => {
         }
         if (typeof destroyDevicesEvent === 'function') {
           destroyDevicesEvent();
+        }
+        if (typeof destroyRoomTimeoutEvent === 'function') {
+          destroyRoomTimeoutEvent();
+        }
+        if (typeof destroyRoomClosedEvent === 'function') {
+          destroyRoomClosedEvent();
         }
       };
     }
@@ -2940,42 +2989,86 @@ export const App: React.FC = () => {
                     {room.clients.length > 0 ? `${room.clients.length} Active Connection` : 'Awaiting Pair'}
                   </span>
                 </div>
-                <button
-                  onClick={() => removeDeviceRoom(room.code)}
-                  style={{
-                    background: 'rgba(244, 63, 94, 0.04)',
-                    border: '1px solid rgba(244, 63, 94, 0.15)',
-                    color: '#fb7185',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    padding: '6px 14px',
-                    borderRadius: '10px',
-                    transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(244, 63, 94, 0.12)';
-                    e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.35)';
-                    e.currentTarget.style.color = '#ef4444';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(244, 63, 94, 0.04)';
-                    e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.15)';
-                    e.currentTarget.style.color = '#fb7185';
-                  }}
-                >
-                  Close Room
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await RestartRoomTimer(room.code);
+                        if (res === "Success") {
+                          setDeviceRooms(prev => prev.map(r => r.code === room.code ? {
+                            ...r,
+                            createdAt: new Date().toISOString(),
+                            logs: [...r.logs, `[${new Date().toLocaleTimeString()}] Room timer manual restart. Resetting 3-hour limit.`]
+                          } : r));
+                        } else {
+                          showModal("Error", `Failed to restart room timer: ${res}`, "error");
+                        }
+                      } catch (err: any) {
+                        showModal("Error", `Failed to restart room: ${err.message || err}`, "error");
+                      }
+                    }}
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.04)',
+                      border: '1px solid rgba(56, 189, 248, 0.15)',
+                      color: '#38bdf8',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      padding: '6px 14px',
+                      borderRadius: '10px',
+                      transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(56, 189, 248, 0.12)';
+                      e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+                      e.currentTarget.style.color = '#0ea5e9';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(56, 189, 248, 0.04)';
+                      e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.15)';
+                      e.currentTarget.style.color = '#38bdf8';
+                    }}
+                  >
+                    Restart
+                  </button>
+                  <button
+                    onClick={() => removeDeviceRoom(room.code)}
+                    style={{
+                      background: 'rgba(244, 63, 94, 0.04)',
+                      border: '1px solid rgba(244, 63, 94, 0.15)',
+                      color: '#fb7185',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      padding: '6px 14px',
+                      borderRadius: '10px',
+                      transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(244, 63, 94, 0.12)';
+                      e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.35)';
+                      e.currentTarget.style.color = '#ef4444';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(244, 63, 94, 0.04)';
+                      e.currentTarget.style.borderColor = 'rgba(244, 63, 94, 0.15)';
+                      e.currentTarget.style.color = '#fb7185';
+                    }}
+                  >
+                    Close Room
+                  </button>
+                </div>
               </div>
 
               {/* Card Body - Pairing Code */}
               <div style={{
-                padding: '28px 24px',
+                padding: '24px 24px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: '8px',
+                gap: '4px',
                 borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
                 background: 'linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.25))'
               }}>
@@ -2988,10 +3081,41 @@ export const App: React.FC = () => {
                   color: '#ffffff',
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '6px',
+                  lineHeight: '1.1',
                   textShadow: '0 0 30px rgba(0, 242, 254, 0.35), 0 0 10px rgba(0, 242, 254, 0.15)'
                 }}>
                   {room.code}
                 </span>
+                {room.createdAt && (
+                  <span style={{
+                    fontSize: '10.5px',
+                    color: '#38bdf8',
+                    fontWeight: 700,
+                    fontFamily: 'var(--font-mono)',
+                    marginTop: '6px',
+                    letterSpacing: '0.5px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    ⏳ {(() => {
+                      const created = new Date(room.createdAt).getTime();
+                      const expires = created + 3 * 60 * 60 * 1000;
+                      const diff = expires - Date.now();
+                      if (diff <= 0) return "EXPIRED";
+                      const totalSecs = Math.floor(diff / 1000);
+                      if (totalSecs < 60) {
+                        return `${totalSecs}s`;
+                      }
+                      const h = Math.floor(totalSecs / 3600);
+                      const m = Math.floor((totalSecs % 3600) / 60);
+                      if (h > 0) {
+                        return `${h}h ${m.toString().padStart(2, '0')}m`;
+                      }
+                      return `${m}m`;
+                    })()}
+                  </span>
+                )}
               </div>
 
               {/* Card Console Logs */}
@@ -3016,29 +3140,150 @@ export const App: React.FC = () => {
                 <div style={{
                   flex: 1,
                   padding: '16px 20px',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '10.5px',
-                  color: 'rgba(255, 255, 255, 0.85)',
                   overflowY: 'auto',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '8px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.35)',
-                  boxShadow: 'inset 0 10px 20px rgba(0,0,0,0.2)'
+                  gap: '12px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.25)',
+                  boxShadow: 'inset 0 10px 20px rgba(0,0,0,0.15)'
                 }}>
-                  {room.logs.map((log, i) => (
-                    <div key={i} style={{
-                      lineHeight: '1.5',
-                      color: log.includes('[ERROR]') ? '#fb7185' : log.includes('Success') || log.includes('Finished') ? 'var(--success)' : 'rgba(255, 255, 255, 0.75)',
-                      borderLeft: log.includes('[ERROR]') ? '2px solid #f43f5e' : log.includes('Success') || log.includes('Finished') ? '2px solid var(--success)' : 'none',
-                      paddingLeft: log.includes('[ERROR]') || log.includes('Success') || log.includes('Finished') ? '6px' : '0px'
-                    }}>
-                      {log}
-                    </div>
-                  ))}
-                  {room.logs.length === 0 && (
-                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Logs will stream here in real time...</div>
-                  )}
+                  {(() => {
+                    const parseLogsToSteps = (logs: string[]) => {
+                      return logs.map(log => {
+                        let time = "";
+                        let message = log;
+                        const match = log.match(/^\[(.*?)\]\s*(.*)$/);
+                        if (match) {
+                          time = match[1];
+                          message = match[2];
+                        }
+                        
+                        let title = "Status Update";
+                        let description = message;
+                        let type: 'info' | 'success' | 'error' | 'sync' | 'render' | 'ready' = 'info';
+
+                        if (message.includes("created") || message.includes("Listening")) {
+                          title = "Room Started";
+                          description = "Room passcode generated. Waiting for device pairing.";
+                          type = "ready";
+                        } else if (message.includes("Syncing presentation workspace") || message.includes("Syncing workspace")) {
+                          title = "Syncing Files";
+                          description = "Transferring presentation slides and resources from Windows.";
+                          type = "sync";
+                        } else if (message.includes("Workspace synced")) {
+                          title = "Workspace Loaded";
+                          description = "Files successfully synchronized and saved.";
+                          type = "success";
+                        } else if (message.includes("Performer HTTP server active") || message.includes("HTTP server active")) {
+                          title = "Preview Ready";
+                          description = "Local server initialized to stream presentation.";
+                          type = "success";
+                        } else if (message.includes("Navigating to URL")) {
+                          title = "Slide Changed";
+                          const urlMatch = message.match(/Navigating to URL:\s*(.*)/);
+                          description = urlMatch ? `Navigated to slide preview at ${urlMatch[1].split('/').pop() || urlMatch[1]}` : "Syncing slide view.";
+                          type = "info";
+                        } else if (message.includes("Received render request")) {
+                          title = "Render Initiated";
+                          description = "Controller requested a high-quality PDF compile.";
+                          type = "info";
+                        } else if (message.includes("Rendering") && message.includes("slides locally")) {
+                          title = "Generating PDF Pages";
+                          description = message;
+                          type = "render";
+                        } else if (message.includes("Finished rendering")) {
+                          title = "PDF Compiled";
+                          description = "PDF compilation completed successfully. Output sent.";
+                          type = "success";
+                        } else if (message.includes("error") || message.includes("failed") || message.includes("Error") || message.includes("tip:")) {
+                          title = "Connection Status / Error";
+                          description = message;
+                          type = "error";
+                        } else if (message.includes("recreated") || message.includes("limit") || message.includes("timeout")) {
+                          title = "Room Timeout Policies";
+                          description = message;
+                          type = "error";
+                        }
+                        
+                        return { time, title, description, type };
+                      });
+                    };
+
+                    const steps = parseLogsToSteps(room.logs);
+                    if (steps.length === 0) {
+                      return <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px', textAlign: 'center', marginTop: '20px' }}>Waiting for room activity...</div>;
+                    }
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {steps.map((step, i) => {
+                          let icon = "🔔";
+                          let color = "var(--blue)";
+                          let bg = "rgba(59, 130, 246, 0.06)";
+                          let border = "rgba(59, 130, 246, 0.12)";
+                          
+                          if (step.type === 'success') {
+                            icon = "⚙️";
+                            color = "var(--success)";
+                            bg = "rgba(16, 185, 129, 0.06)";
+                            border = "rgba(16, 185, 129, 0.12)";
+                          } else if (step.type === 'error') {
+                            icon = "⚠️";
+                            color = "#fb7185";
+                            bg = "rgba(244, 63, 94, 0.06)";
+                            border = "rgba(244, 63, 94, 0.12)";
+                          } else if (step.type === 'sync') {
+                            icon = "🔄";
+                            color = "var(--accent)";
+                            bg = "rgba(168, 85, 247, 0.06)";
+                            border = "rgba(168, 85, 247, 0.12)";
+                          } else if (step.type === 'render') {
+                            icon = "📄";
+                            color = "#00f2fe";
+                            bg = "rgba(0, 242, 254, 0.06)";
+                            border = "rgba(0, 242, 254, 0.12)";
+                          } else if (step.type === 'ready') {
+                            icon = "🌐";
+                            color = "#38bdf8";
+                            bg = "rgba(56, 189, 248, 0.06)";
+                            border = "rgba(56, 189, 248, 0.12)";
+                          }
+
+                          return (
+                            <div key={i} style={{
+                              display: 'flex',
+                              gap: '10px',
+                              alignItems: 'flex-start',
+                              backgroundColor: bg,
+                              border: `1px solid ${border}`,
+                              borderRadius: '12px',
+                              padding: '8px 12px',
+                              transition: 'all 0.2s ease',
+                            }}>
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '24px',
+                                height: '24px',
+                                borderRadius: '50%',
+                                backgroundColor: 'rgba(255,255,255,0.03)',
+                                fontSize: '12px'
+                              }}>
+                                {icon}
+                              </div>
+                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontWeight: 700, color: '#ffffff', fontSize: '11px' }}>{step.title}</span>
+                                  <span style={{ fontSize: '9px', color: 'var(--text-3)', fontWeight: 600 }}>{step.time}</span>
+                                </div>
+                                <span style={{ fontSize: '10.5px', color: 'rgba(255,255,255,0.6)', lineHeight: '1.4' }}>{step.description}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

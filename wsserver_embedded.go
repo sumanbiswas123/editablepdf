@@ -42,40 +42,53 @@ type WSClient struct {
 	srv  *WSServer
 }
 
+var MaxRooms = 10
+
 type WSRoom struct {
-	id      string
-	clients map[string]*WSClient
-	mu      sync.Mutex
-	owner   string // client id of mac that owns this paired device room
-	srv     *WSServer
+	id        string
+	clients   map[string]*WSClient
+	mu        sync.Mutex
+	owner     string // client id of mac that owns this paired device room
+	srv       *WSServer
+	createdAt time.Time
 }
 
 type WSServer struct {
 	rooms   map[string]*WSRoom
 	clients map[string]*WSClient
 	mu      sync.Mutex
+	app     *App
 }
 
 var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-func newWSServer() *WSServer {
+func newWSServer(app *App) *WSServer {
 	return &WSServer{
 		rooms:   make(map[string]*WSRoom),
 		clients: make(map[string]*WSClient),
+		app:     app,
 	}
 }
 
-func (s *WSServer) getOrCreateRoom(id string) *WSRoom {
+func (s *WSServer) getOrCreateRoom(id string) (*WSRoom, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if r, ok := s.rooms[id]; ok {
-		return r
+		return r, nil
 	}
-	r := &WSRoom{id: id, clients: make(map[string]*WSClient), srv: s}
+	if len(s.rooms) >= MaxRooms {
+		return nil, fmt.Errorf("Maximum room limit of %d reached", MaxRooms)
+	}
+	r := &WSRoom{
+		id:        id,
+		clients:   make(map[string]*WSClient),
+		srv:       s,
+		createdAt: time.Now(),
+	}
 	s.rooms[id] = r
-	return r
+	return r, nil
 }
 
 func (s *WSServer) generateRoomID() string {
@@ -140,9 +153,15 @@ func (s *WSServer) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.generateRoomID()
-	s.getOrCreateRoom(id)
+	_, err := s.getOrCreateRoom(id)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"room": id})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"room": id, "createdAt": time.Now().Format(time.RFC3339)})
 }
 
 func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +194,19 @@ func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.clients[client.id] = client
 	s.mu.Unlock()
 
-	room := s.getOrCreateRoom(roomID)
+	room, err := s.getOrCreateRoom(roomID)
+	if err != nil {
+		_ = conn.WriteJSON(WSMessage{
+			Type: "error",
+			Data: err.Error(),
+		})
+		_ = conn.Close()
+		s.mu.Lock()
+		delete(s.clients, client.id)
+		s.mu.Unlock()
+		return
+	}
+
 	room.mu.Lock()
 	if role == "windows" {
 		for _, c := range room.clients {
@@ -186,6 +217,9 @@ func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
 					Data: "This pairing code is already in use by another device.",
 				})
 				_ = conn.Close()
+				s.mu.Lock()
+				delete(s.clients, client.id)
+				s.mu.Unlock()
 				return
 			}
 		}
@@ -202,6 +236,13 @@ func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	room.mu.Unlock()
 
 	room.notifyOwnerOfClients()
+
+	// Send initial room timer info to the newly connected client
+	client.send <- WSMessage{
+		Type:   "room_info",
+		Data:   room.createdAt.Format(time.RFC3339),
+		Target: room.id,
+	}
 
 	go client.writePump()
 	client.readPump()
@@ -245,9 +286,29 @@ func (c *WSClient) readPump() {
 		case "create_device":
 			if c.role == "mac" {
 				id := c.srv.generateRoomID()
-				r := c.srv.getOrCreateRoom(id)
+				r, err := c.srv.getOrCreateRoom(id)
+				if err != nil {
+					c.send <- WSMessage{Type: "error", Data: err.Error()}
+					break
+				}
 				r.owner = c.id
 				c.send <- WSMessage{Type: "device_created", Data: id}
+			}
+		case "extend_session":
+			if c.room != nil {
+				c.room.mu.Lock()
+				c.room.createdAt = time.Now()
+				c.room.mu.Unlock()
+
+				c.room.broadcast(WSMessage{
+					Type:   "room_info",
+					Data:   c.room.createdAt.Format(time.RFC3339),
+					Target: c.room.id,
+				}, "")
+
+				if c.srv != nil && c.srv.app != nil {
+					c.srv.app.emitViewershipEvent(c.room.id, "Room session extended via client request. Resetting 3-hour limit.")
+				}
 			}
 		case "list_devices":
 			if c.role == "mac" {
@@ -467,6 +528,114 @@ var (
 	serverStarted    bool
 )
 
+func (s *WSServer) startTimeoutChecker() {
+	ticker := time.NewTicker(5 * time.Second)
+	go func() {
+		for range ticker.C {
+			s.checkRoomTimeouts()
+		}
+	}()
+}
+
+func (s *WSServer) checkRoomTimeouts() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	timeoutDuration := 3 * time.Hour
+
+	if len(s.rooms) == 0 {
+		return
+	}
+
+	// Find all timed out rooms
+	var expiredRooms []*WSRoom
+	for _, room := range s.rooms {
+		if now.Sub(room.createdAt) >= timeoutDuration {
+			expiredRooms = append(expiredRooms, room)
+		}
+	}
+
+	if len(expiredRooms) == 0 {
+		return
+	}
+
+	totalRooms := len(s.rooms)
+
+	for _, room := range expiredRooms {
+		// If it is the ONLY room, recreate it
+		if totalRooms == 1 {
+			log.Printf("[WSServer] Only active room %s timed out. Recreating...", room.id)
+			
+			// Close all clients in this room
+			s.closeRoomClientsNoLock(room)
+			delete(s.rooms, room.id)
+
+			// Start a new room
+			newRoomID := s.generateRoomIDNoLock()
+			newRoom := &WSRoom{
+				id:        newRoomID,
+				clients:   make(map[string]*WSClient),
+				srv:       s,
+				createdAt: time.Now(),
+			}
+			s.rooms[newRoomID] = newRoom
+			log.Printf("[WSServer] Auto-created new room %s after timeout.", newRoomID)
+
+			if s.app != nil && s.app.app != nil {
+				s.app.app.Event.Emit("room_timeout_recreate", map[string]string{
+					"oldRoom": room.id,
+					"newRoom": newRoomID,
+				})
+				s.app.emitViewershipEvent(room.id, fmt.Sprintf("Room %s reached 3-hour limit and has been recreated as Room %s.", room.id, newRoomID))
+			}
+			// There was only 1 room, which we recreated. We are done checking.
+			return
+		} else {
+			// If there are multiple rooms, close this expired room
+			log.Printf("[WSServer] Room %s timed out with multiple rooms active. Closing it.", room.id)
+			s.closeRoomClientsNoLock(room)
+			delete(s.rooms, room.id)
+			totalRooms-- // decrement for other rooms checks in this loop iteration
+
+			if s.app != nil && s.app.app != nil {
+				s.app.app.Event.Emit("room_closed_by_timeout", map[string]string{
+					"room": room.id,
+				})
+				s.app.emitViewershipEvent(room.id, fmt.Sprintf("Room %s closed due to 3-hour timeout.", room.id))
+			}
+		}
+	}
+}
+
+func (s *WSServer) closeRoomClientsNoLock(room *WSRoom) {
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	for _, client := range room.clients {
+		_ = client.conn.WriteJSON(WSMessage{
+			Type: "error",
+			Data: "This room has expired after the 3-hour timeout.",
+		})
+		_ = client.conn.Close()
+	}
+	room.clients = make(map[string]*WSClient)
+}
+
+func (s *WSServer) generateRoomIDNoLock() string {
+	for i := 0; i < 10; i++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+		if err != nil {
+			break
+		}
+		id := fmt.Sprintf("%06d", n.Int64())
+		_, exists := s.rooms[id]
+		if !exists {
+			return id
+		}
+	}
+	return uuid.New().String()[:6]
+}
+
 // StartEmbeddedWSServer starts the websocket server inside the Wails application
 func (a *App) StartEmbeddedWSServer() string {
 	embeddedServerMu.Lock()
@@ -475,7 +644,9 @@ func (a *App) StartEmbeddedWSServer() string {
 		return "Running"
 	}
 
-	embeddedServer = newWSServer()
+	embeddedServer = newWSServer(a)
+	embeddedServer.startTimeoutChecker()
+	
 	mux := http.NewServeMux()
 	mux.HandleFunc("/create-room", embeddedServer.handleCreateRoom)
 	mux.HandleFunc("/ws", embeddedServer.handleWS)
@@ -559,4 +730,26 @@ func (a *App) SaveRemotePDF(filename string, base64Data string) (string, error) 
 	}
 
 	return outputPath, nil
+}
+
+// RestartRoomTimer resets the creation time of a room back to now, restarting its 3-hour limit
+func (a *App) RestartRoomTimer(roomCode string) string {
+	embeddedServerMu.Lock()
+	defer embeddedServerMu.Unlock()
+	if embeddedServer == nil {
+		return "Server not started"
+	}
+	embeddedServer.mu.Lock()
+	defer embeddedServer.mu.Unlock()
+	if r, ok := embeddedServer.rooms[roomCode]; ok {
+		r.createdAt = time.Now()
+		r.broadcast(WSMessage{
+			Type:   "room_info",
+			Data:   r.createdAt.Format(time.RFC3339),
+			Target: r.id,
+		}, "")
+		a.emitViewershipEvent(roomCode, "Room timer restarted. Resetting 3-hour timeout limit.")
+		return "Success"
+	}
+	return "Room not found"
 }

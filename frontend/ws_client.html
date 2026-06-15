@@ -10,6 +10,10 @@
 </head>
 <body>
   <h3>WebSocket Screenshot Room</h3>
+  <div id="timerContainer" style="display:none; margin-bottom:12px; padding:10px; background:#e0f2fe; border:1px solid #bae6fd; border-radius:6px; color:#0369a1; font-weight:bold; max-width: 500px;">
+    ⏳ Time Remaining: <span id="timeRemaining">--</span>
+    <button id="extendSession" style="margin-left:12px; font-weight:bold; cursor:pointer;">Extend Session</button>
+  </div>
   <div>
     <button id="createRoom">Create Room</button>
     Room ID: <input id="roomId" style="width:420px" />
@@ -121,6 +125,11 @@
         ws.onmessage = (ev)=>{
           try{
             const msg = JSON.parse(ev.data);
+            if(msg.type === 'room_info'){
+              roomCreatedAt = msg.data;
+              document.getElementById('timerContainer').style.display = 'block';
+              return;
+            }
             if(msg.type === 'device_created'){
               const span = document.getElementById('deviceCode');
               span.textContent = msg.data;
@@ -160,6 +169,8 @@
         document.getElementById('connect').disabled = false;
         document.getElementById('disconnect').disabled = true;
         document.getElementById('macControls').style.display='none';
+        document.getElementById('timerContainer').style.display='none';
+        roomCreatedAt = null;
       };
     });
 
@@ -224,6 +235,38 @@
         grid.appendChild(card);
       })
     }
+
+    let roomCreatedAt = null;
+
+    document.getElementById('extendSession').addEventListener('click', ()=>{
+      if(ws && ws.readyState === 1){
+        ws.send(JSON.stringify({ type: 'extend_session' }));
+      }
+    });
+
+    setInterval(() => {
+      if(!roomCreatedAt) return;
+      const created = new Date(roomCreatedAt).getTime();
+      const expires = created + 3 * 60 * 60 * 1000;
+      const diff = expires - Date.now();
+      const span = document.getElementById('timeRemaining');
+      if (diff <= 0) {
+        span.textContent = "Expired";
+        return;
+      }
+      const totalSecs = Math.floor(diff / 1000);
+      if (totalSecs < 60) {
+        span.textContent = totalSecs + "s";
+      } else {
+        const hours = Math.floor(totalSecs / 3600);
+        const minutes = Math.floor((totalSecs % 3600) / 60);
+        if (hours > 0) {
+          span.textContent = hours + "h " + minutes.toString().padStart(2, '0') + "m";
+        } else {
+          span.textContent = minutes + "m";
+        }
+      }
+    }, 1000);
 
     // poll for devices when mac connected
     setInterval(()=>{
