@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -2092,4 +2093,26 @@ func (a *App) OpenBuilderWindow() {
 		URL:    "/?mode=builder",
 		BackgroundColour: application.RGBA{Red: 27, Green: 38, Blue: 54, Alpha: 255},
 	})
+}
+
+// GetSystemUsername returns the current system user's name or username
+func (a *App) GetSystemUsername() string {
+	u, err := user.Current()
+	if err != nil {
+		name := os.Getenv("USERNAME")
+		if name == "" {
+			name = os.Getenv("USER")
+		}
+		if name == "" {
+			name = "Unknown User"
+		}
+		return name
+	}
+	if u.Name != "" {
+		return u.Name
+	}
+	// On Windows, u.Username might include the domain (e.g. DOMAIN\username).
+	// Let's strip the domain prefix for a cleaner display name.
+	parts := strings.Split(u.Username, "\\")
+	return parts[len(parts)-1]
 }

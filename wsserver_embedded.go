@@ -37,6 +37,7 @@ type WSMessage struct {
 type WSClient struct {
 	id   string
 	role string
+	name string
 	conn *websocket.Conn
 	send chan WSMessage
 	room *WSRoom
@@ -117,7 +118,7 @@ func (r *WSRoom) notifyOwnerOfClients() {
 	clientsList := []string{}
 	for _, c := range r.clients {
 		if c.role == "windows" {
-			clientsList = append(clientsList, c.id[:8]) // Short client identifier
+			clientsList = append(clientsList, c.name) // Logged-in user's name
 		}
 	}
 	r.mu.Unlock()
@@ -176,6 +177,16 @@ func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = "guest"
 	}
+	name := q.Get("name")
+	if name == "" {
+		if role == "windows" {
+			name = "Windows Device"
+		} else if role == "mac" {
+			name = "Mac Performer"
+		} else {
+			name = role
+		}
+	}
 
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -186,6 +197,7 @@ func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	client := &WSClient{
 		id:   uuid.New().String(),
 		role: role,
+		name: name,
 		conn: conn,
 		send: make(chan WSMessage, 64),
 		srv:  s,
@@ -239,7 +251,7 @@ func (s *WSServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	room.notifyOwnerOfClients()
 
 	if s.app != nil {
-		s.app.emitViewershipEvent(room.id, fmt.Sprintf("Device joined room: %s (role: %s)", client.id[:8], role))
+		s.app.emitViewershipEvent(room.id, fmt.Sprintf("Device joined room: %s (role: %s)", client.name, role))
 	}
 
 	// Send initial room timer info to the newly connected client
@@ -299,6 +311,10 @@ func (c *WSClient) readPump() {
 				}
 				c.room.clients = make(map[string]*WSClient)
 				c.room.mu.Unlock()
+			} else {
+				if c.srv != nil && c.srv.app != nil {
+					c.srv.app.emitViewershipEvent(c.room.id, fmt.Sprintf("Device left room: %s (role: %s)", c.name, c.role))
+				}
 			}
 		}
 		if c.srv != nil {

@@ -39,7 +39,8 @@ import {
   SyncWorkspaceToMac,
   ReadLocalFile,
   OpenBuilderWindow,
-  RestartRoomTimer
+  RestartRoomTimer,
+  GetSystemUsername
 } from '../bindings/htmltoepdf/app';
 
 import { Events } from '@wailsio/runtime';
@@ -2055,13 +2056,19 @@ export const App: React.FC = () => {
   };
 
   // WebSocket controller connection function for Windows
-  const connectToMac = (ip: string, code: string) => {
+  const connectToMac = async (ip: string, code: string) => {
     if (!ip || !code) {
       alert("Please enter the Mac's IP address and the 6-digit pairing code.");
       return;
     }
     setWsConnectionState('connecting');
-    const wsUrl = `ws://${ip}:8081/ws?room=${code}&role=windows`;
+
+    let username = "Windows Device";
+    try {
+      username = await GetSystemUsername();
+    } catch (_) {}
+
+    const wsUrl = `ws://${ip}:8081/ws?room=${code}&role=windows&name=${encodeURIComponent(username)}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
