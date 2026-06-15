@@ -294,6 +294,14 @@ func (c *WSClient) readPump() {
 				r.owner = c.id
 				c.send <- WSMessage{Type: "device_created", Data: id}
 			}
+		case "request_room_info":
+			if c.room != nil {
+				c.send <- WSMessage{
+					Type:   "room_info",
+					Data:   c.room.createdAt.Format(time.RFC3339),
+					Target: c.room.id,
+				}
+			}
 		case "extend_session":
 			if c.room != nil {
 				c.room.mu.Lock()

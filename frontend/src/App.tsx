@@ -2054,6 +2054,8 @@ export const App: React.FC = () => {
       setControllerWS(ws);
       localStorage.setItem('capture-mac-ip', ip);
       localStorage.setItem('capture-mac-code', code);
+      // Explicitly request room info upon connection open
+      ws.send(JSON.stringify({ type: 'request_room_info' }));
     };
 
     ws.onmessage = async (event) => {
