@@ -577,7 +577,7 @@ func (s *WSServer) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Write(b)
-	case <-time.After(8 * time.Second):
+	case <-time.After(30 * time.Second):
 		http.Error(w, "timeout waiting for controller response", http.StatusGatewayTimeout)
 	}
 }
