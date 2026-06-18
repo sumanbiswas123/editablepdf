@@ -343,10 +343,13 @@ export const Canvas: React.FC<CanvasProps> = ({
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
           zIndex: 100,
-          border: '1px solid var(--border-2)',
-          backgroundColor: 'var(--bg-glass)'
+          border: '1px solid rgba(255, 255, 255, 0.25)',
+          background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.02) 50.1%, rgba(255, 255, 255, 0.12) 100%)',
+          backgroundColor: 'var(--bg-glass)',
+          backdropFilter: 'blur(20px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.25), inset 0 1px 1px rgba(255,255,255,0.45), inset 0 -1px 2px rgba(0,0,0,0.1)'
         }}
       >
         <button
@@ -361,10 +364,12 @@ export const Canvas: React.FC<CanvasProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            transition: 'color var(--transition)'
+            transition: 'color var(--transition)',
+            position: 'relative'
           }}
-          className="nav-btn"
-          title="Previous Slide"
+          className="nav-btn custom-tooltip"
+          data-tooltip="Shift + P"
+          data-action="prev-slide"
         >
           <ArrowLeft size={14} />
         </button>
@@ -381,7 +386,6 @@ export const Canvas: React.FC<CanvasProps> = ({
          }}>
           {currentSlideIndex + 1} / {totalSlides}
         </span>
-
         <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
 
         <button
@@ -396,10 +400,12 @@ export const Canvas: React.FC<CanvasProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            transition: 'color var(--transition)'
+            transition: 'color var(--transition)',
+            position: 'relative'
           }}
-          className="nav-btn"
-          title="Reload Slide Frame"
+          className="nav-btn custom-tooltip"
+          data-tooltip="Shift + T"
+          data-action="reload-slide"
         >
           <RotateCw size={12} />
         </button>
@@ -418,85 +424,128 @@ export const Canvas: React.FC<CanvasProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            transition: 'color var(--transition)'
+            transition: 'color var(--transition)',
+            position: 'relative'
           }}
-          className="nav-btn"
           className="nav-btn custom-tooltip"
-          data-tooltip="Next Slide"
+          data-tooltip="Shift + N"
+          data-action="next-slide"
         >
           <ArrowRight size={14} />
         </button>
-
-        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
-
-        {/* Integrated Action Buttons */}
-        <button
-          onClick={onSaveSlide}
-          disabled={currentSlideIndex === -1 || isCompiling}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--accent)',
-            fontSize: '10.5px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            padding: '4px 8px',
-            borderRadius: '12px',
-            transition: 'all var(--transition)',
-            position: 'relative'
-          }}
-          className="nav-btn custom-tooltip"
-          data-tooltip="Shift + S"
-        >
-          Save Slide
-        </button>
-
-        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
-
-        <button
-          onClick={onAutoSlide}
-          disabled={currentSlideIndex === -1 || isCompiling}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--purple)',
-            fontSize: '10.5px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            padding: '4px 8px',
-            borderRadius: '12px',
-            transition: 'all var(--transition)',
-            position: 'relative'
-          }}
-          className="nav-btn custom-tooltip"
-          data-tooltip="Shift + A"
-        >
-          Auto Slide
-        </button>
-
-        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
-
-        <button
-          onClick={onFullAuto}
-          disabled={totalSlides === 0 || isCompiling}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--blue)',
-            fontSize: '10.5px',
-            fontWeight: 800,
-            cursor: 'pointer',
-            padding: '4px 8px',
-            borderRadius: '12px',
-            transition: 'all var(--transition)',
-            position: 'relative'
-          }}
-          className="nav-btn custom-tooltip"
-          data-tooltip="Shift + F"
-        >
-          Full Auto
-        </button>
-      </div>
+ 
+         <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+ 
+         {/* Integrated Action Buttons */}
+         <button
+           onClick={onSaveSlide}
+           disabled={currentSlideIndex === -1 || isCompiling}
+           style={{
+             background: 'transparent',
+             border: 'none',
+             color: 'var(--accent)',
+             fontSize: '10.5px',
+             fontWeight: 700,
+             cursor: 'pointer',
+             padding: '4px 8px',
+             borderRadius: '12px',
+             transition: 'all var(--transition)',
+             position: 'relative'
+           }}
+           className="nav-btn custom-tooltip"
+           data-tooltip="Shift + S"
+           data-action="save-slide"
+         >
+           Save Slide
+         </button>
+ 
+         <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+ 
+         <button
+           onClick={onAutoSlide}
+           disabled={currentSlideIndex === -1 || isCompiling}
+           style={{
+             background: 'transparent',
+             border: 'none',
+             color: 'var(--purple)',
+             fontSize: '10.5px',
+             fontWeight: 700,
+             cursor: 'pointer',
+             padding: '4px 8px',
+             borderRadius: '12px',
+             transition: 'all var(--transition)',
+             position: 'relative'
+           }}
+           className="nav-btn custom-tooltip"
+           data-tooltip="Shift + A"
+           data-action="auto-slide"
+         >
+           Auto Slide
+         </button>
+ 
+         <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+ 
+         <button
+           onClick={onFullAuto}
+           disabled={totalSlides === 0 || isCompiling}
+           style={{
+             background: 'transparent',
+             border: 'none',
+             color: 'var(--blue)',
+             fontSize: '10.5px',
+             fontWeight: 800,
+             cursor: 'pointer',
+             padding: '4px 8px',
+             borderRadius: '12px',
+             transition: 'all var(--transition)',
+             position: 'relative'
+           }}
+           className="nav-btn custom-tooltip"
+           data-tooltip="Shift + F"
+           data-action="full-auto"
+         >
+           Full Auto
+         </button>
+       </div>
+ 
+       {currentSlideIndex === 0 && (
+         <button
+           onClick={() => {
+             setShowBottomBar(prev => !prev);
+             setShowVeevaMenu(prev => !prev);
+           }}
+           className="glass-panel nav-btn custom-tooltip"
+           data-tooltip="Shift + H"
+           data-action="capture-swimlane"
+           style={{
+             position: 'absolute',
+             bottom: '20px',
+             left: 'calc(46% + 350px)',
+             transform: 'translateX(-50%)',
+             borderRadius: '24px',
+             padding: '10px 22px',
+             display: 'flex',
+             alignItems: 'center',
+             justifyContent: 'center',
+             zIndex: 100,
+             border: '1px solid rgba(255, 255, 255, 0.25)',
+             background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.02) 50.1%, rgba(255, 255, 255, 0.12) 100%)',
+             backgroundColor: 'var(--bg-glass)',
+             backdropFilter: 'blur(20px) saturate(180%)',
+             WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+             boxShadow: '0 8px 32px rgba(0,0,0,0.25), inset 0 1px 1px rgba(255,255,255,0.45), inset 0 -1px 2px rgba(0,0,0,0.1)',
+             cursor: 'pointer',
+             transition: 'all 0.2s ease',
+             color: 'var(--accent)',
+             fontSize: '10.5px',
+             fontWeight: 800,
+             whiteSpace: 'nowrap',
+             textShadow: '0 1px 1px rgba(255,255,255,0.2)'
+           }}
+         >
+           Capture Swimlane
+         </button>
+       )}
 
       {/* Sized-constrained container to match visual scaled dimensions */}
       <div

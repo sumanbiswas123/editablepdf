@@ -555,16 +555,32 @@ export const App: React.FC = () => {
         const key = e.key.toLowerCase();
         if (key === 's') {
           e.preventDefault();
-          const saveBtn = document.querySelector('button[title*="Save Current Slide"]') as HTMLButtonElement;
+          const saveBtn = document.querySelector('button[data-action="save-slide"]') as HTMLButtonElement;
           if (saveBtn && !saveBtn.disabled) saveBtn.click();
         } else if (key === 'a') {
           e.preventDefault();
-          const autoBtn = document.querySelector('button[title*="Auto Slide Crawl"]') as HTMLButtonElement;
+          const autoBtn = document.querySelector('button[data-action="auto-slide"]') as HTMLButtonElement;
           if (autoBtn && !autoBtn.disabled) autoBtn.click();
         } else if (key === 'f') {
           e.preventDefault();
-          const fullBtn = document.querySelector('button[title*="Full Auto Deck"]') as HTMLButtonElement;
+          const fullBtn = document.querySelector('button[data-action="full-auto"]') as HTMLButtonElement;
           if (fullBtn && !fullBtn.disabled) fullBtn.click();
+        } else if (key === 'h') {
+          e.preventDefault();
+          const swimlaneBtn = document.querySelector('button[data-action="capture-swimlane"]') as HTMLButtonElement;
+          if (swimlaneBtn && !swimlaneBtn.disabled) swimlaneBtn.click();
+        } else if (key === 't') {
+          e.preventDefault();
+          const reloadBtn = document.querySelector('button[data-action="reload-slide"]') as HTMLButtonElement;
+          if (reloadBtn && !reloadBtn.disabled) reloadBtn.click();
+        } else if (key === 'n') {
+          e.preventDefault();
+          const nextBtn = document.querySelector('button[data-action="next-slide"]') as HTMLButtonElement;
+          if (nextBtn && !nextBtn.disabled) nextBtn.click();
+        } else if (key === 'p') {
+          e.preventDefault();
+          const prevBtn = document.querySelector('button[data-action="prev-slide"]') as HTMLButtonElement;
+          if (prevBtn && !prevBtn.disabled) prevBtn.click();
         }
       }
     };
@@ -2589,6 +2605,51 @@ export const App: React.FC = () => {
               await EndPDFSession("");
             } catch (_) {}
           }
+        }
+      }
+
+      // After taking all slides, come back to the first slide (idx = 0) to capture bottom navigation (Slides) and Veeva Action Menu states
+      if (slides.length > 0) {
+        const firstSlide = slides[0];
+        setCompilationProgress({
+          phase: 'crawling',
+          current: slides.length,
+          total: slides.length + 2,
+          slide: firstSlide.name,
+          detail: 'Returning to first slide to capture custom panels...'
+        });
+        
+        try {
+          setCurrentSlideIndex(0);
+          await new Promise((r) => setTimeout(r, sleepMs + 400));
+
+          // 1. Open the slides section (bottom slider bar) and capture it
+          updateProgress("🔄 Opening bottom navigation section...");
+          setShowBottomBar(true);
+          await new Promise((r) => setTimeout(r, sleepMs));
+          
+          updateProgress("📸 Capturing bottom navigation section...");
+          await captureAndCompileState("Bottom Navigation (Slides Open)");
+          
+          // Close bottom navigation section
+          setShowBottomBar(false);
+          await new Promise((r) => setTimeout(r, 400));
+
+          // 2. Open the Veeva Action Menu and capture it
+          updateProgress("🔄 Opening Veeva CRM action menu...");
+          setShowVeevaMenu(true);
+          await new Promise((r) => setTimeout(r, sleepMs));
+
+          updateProgress("📸 Capturing action menu popup...");
+          await captureAndCompileState("Action Menu (Open)");
+
+          // Close action menu
+          setShowVeevaMenu(false);
+          await new Promise((r) => setTimeout(r, 400));
+        } catch (overlayErr) {
+          console.warn("Failed to capture bottom bar / action menu overlays on first slide:", overlayErr);
+          setShowBottomBar(false);
+          setShowVeevaMenu(false);
         }
       }
 
