@@ -33,6 +33,9 @@ interface CanvasProps {
   slides: Slide[];
   onSelectSlide: (index: number) => void;
   presentationId: string;
+  onSaveSlide?: () => void;
+  onAutoSlide?: () => void;
+  onFullAuto?: () => void;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -53,6 +56,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   slides,
   onSelectSlide,
   presentationId,
+  onSaveSlide,
+  onAutoSlide,
+  onFullAuto,
 }) => {
   if (!activeSlide) {
     return (
@@ -98,6 +104,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [dimensions, setDimensions] = React.useState({ width: 1024, height: 768 });
 
   const [showBottomBar, setShowBottomBar] = React.useState(false);
+  const [showVeevaMenu, setShowVeevaMenu] = React.useState(false);
   const thumbsContainerRef = React.useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = React.useState(0);
   const currentPageRef = React.useRef(0);      // always up-to-date, safe inside event listeners
@@ -110,16 +117,62 @@ export const Canvas: React.FC<CanvasProps> = ({
   const didDrag = React.useRef(false);
   const lastWheelTime = React.useRef(0);        // debounce trackpad wheel bursts
 
-  // Toggle bottom bar on iframe message
+  // Toggle bottom bar on iframe message and bind top-left click detection in iframe
   React.useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
-      if (e.data && e.data.type === 'epdf_toggle_bottom_bar') {
-        setShowBottomBar(prev => !prev);
+      if (e.data) {
+        if (e.data.type === 'epdf_toggle_bottom_bar') {
+          setShowBottomBar(prev => !prev);
+        } else if (e.data.type === 'epdf_toggle_veeva_menu') {
+          setShowVeevaMenu(prev => !prev);
+        }
       }
     };
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+
+    const handleIframeClick = (e: MouseEvent) => {
+      // Check if user clicked the actual three-dots button/image/element inside the iframe.
+      // We check if the element clicked has an img with "three" in src, or class, or if it's within the top-left area.
+      const target = e.target as HTMLElement;
+      const isThreeDots = !!(
+        target.closest('[class*="three-dot"]') ||
+        target.closest('[id*="three-dot"]') ||
+        target.closest('[class*="menu"]') ||
+        (target.tagName === 'IMG' && ((target as HTMLImageElement).src.includes('three') || (target as HTMLImageElement).src.includes('dot') || (target as HTMLImageElement).src.includes('menu'))) ||
+        e.clientX < 80 && e.clientY < 50
+      );
+
+      if (isThreeDots) {
+        setShowVeevaMenu(prev => !prev);
+      }
+    };
+
+    const attachIFrameListener = () => {
+      try {
+        const iframe = iframeRef.current;
+        if (!iframe) return;
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (!doc) return;
+        
+        doc.removeEventListener('click', handleIframeClick);
+        doc.addEventListener('click', handleIframeClick);
+      } catch (err) {
+        // Safe catch for load states
+      }
+    };
+
+    const interval = setInterval(attachIFrameListener, 1000);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      clearInterval(interval);
+      try {
+        const iframe = iframeRef.current;
+        const doc = iframe?.contentDocument || iframe?.contentWindow?.document;
+        doc?.removeEventListener('click', handleIframeClick);
+      } catch (err) {}
+    };
+  }, [currentSlideIndex, activeSlide]);
 
   const targetWidth = isVertical ? 768 : 1024;
 
@@ -283,7 +336,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         style={{
           position: 'absolute',
           bottom: '20px',
-          left: '50%',
+          left: '46%', // Shifted slightly to the left to balance the added control buttons
           transform: 'translateX(-50%)',
           borderRadius: '24px',
           padding: '6px 14px',
@@ -325,7 +378,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           fontVariantNumeric: 'tabular-nums',
           fontFamily: 'var(--font-mono)',
           letterSpacing: '0.5px'
-        }}>
+         }}>
           {currentSlideIndex + 1} / {totalSlides}
         </span>
 
@@ -368,9 +421,80 @@ export const Canvas: React.FC<CanvasProps> = ({
             transition: 'color var(--transition)'
           }}
           className="nav-btn"
-          title="Next Slide"
+          className="nav-btn custom-tooltip"
+          data-tooltip="Next Slide"
         >
           <ArrowRight size={14} />
+        </button>
+
+        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+
+        {/* Integrated Action Buttons */}
+        <button
+          onClick={onSaveSlide}
+          disabled={currentSlideIndex === -1 || isCompiling}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--accent)',
+            fontSize: '10.5px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            padding: '4px 8px',
+            borderRadius: '12px',
+            transition: 'all var(--transition)',
+            position: 'relative'
+          }}
+          className="nav-btn custom-tooltip"
+          data-tooltip="Shift + S"
+        >
+          Save Slide
+        </button>
+
+        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+
+        <button
+          onClick={onAutoSlide}
+          disabled={currentSlideIndex === -1 || isCompiling}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--purple)',
+            fontSize: '10.5px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            padding: '4px 8px',
+            borderRadius: '12px',
+            transition: 'all var(--transition)',
+            position: 'relative'
+          }}
+          className="nav-btn custom-tooltip"
+          data-tooltip="Shift + A"
+        >
+          Auto Slide
+        </button>
+
+        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+
+        <button
+          onClick={onFullAuto}
+          disabled={totalSlides === 0 || isCompiling}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--blue)',
+            fontSize: '10.5px',
+            fontWeight: 800,
+            cursor: 'pointer',
+            padding: '4px 8px',
+            borderRadius: '12px',
+            transition: 'all var(--transition)',
+            position: 'relative'
+          }}
+          className="nav-btn custom-tooltip"
+          data-tooltip="Shift + F"
+        >
+          Full Auto
         </button>
       </div>
 
@@ -463,6 +587,96 @@ export const Canvas: React.FC<CanvasProps> = ({
                 }} />
               </div>
             </div>
+            {/* Dropdown Menu (connected to slide's built-in header click) */}
+            {showVeevaMenu && (
+              <div style={{
+                position: 'absolute',
+                top: '45px',
+                left: '17px',
+                zIndex: 200,
+                userSelect: 'none'
+              }}>
+                {/* Invisible backdrop to close menu on outside click */}
+                <div 
+                  onClick={() => setShowVeevaMenu(false)}
+                  style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100vw',
+                    height: '100vh',
+                    zIndex: 199,
+                    cursor: 'default'
+                  }}
+                />
+                
+                {/* Menu Card */}
+                <div 
+                  style={{
+                    position: 'relative',
+                    width: '240px',
+                    backgroundColor: 'rgb(215, 222, 235)',
+                    backdropFilter: 'blur(25px) saturate(190%)',
+                    borderRadius: '0px 16px 16px 16px',
+                    boxShadow: '0 10px 30px rgba(0, 0, 0, 0.15)',
+                    zIndex: 200,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'visible', // Ensure caret/arrow stays visible
+                    animation: 'veevaMenuFadeIn 0.2s ease-out'
+                  }}
+                >
+                  {/* Caret pointing to the three dots */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '-8.5px',
+                    left: '2px',
+                    width: '18px',
+                    height: '18px',
+                    backgroundColor: 'rgb(215, 222, 235)',
+                    transform: 'rotate(45deg)',
+                    zIndex: 201,
+                    borderRadius: '4px 0px 5px 5px',
+                    clipPath: 'polygon(0% 0%, 100% 0%, 0% 100%)'
+                  }} />
+
+                  {/* Menu Items */}
+                  {[
+                    { label: 'Done', action: () => { console.log('Done clicked'); } },
+                    { label: 'Slides', action: () => { setShowBottomBar(true); } },
+                    { label: 'Select Account', action: () => { console.log('Select Account clicked'); } },
+                    { label: 'Show Information', action: () => { console.log('Show Information clicked'); } },
+                    { label: 'Save For Later', action: () => { console.log('Save For Later clicked'); } }
+                  ].map((item, index, arr) => (
+                    <div 
+                      key={item.label}
+                      onClick={() => {
+                        item.action();
+                        setShowVeevaMenu(false);
+                      }}
+                      style={{
+                        padding: '13px 16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        borderBottom: index < arr.length - 1 ? '1px solid rgba(0, 0, 0, 0.08)' : 'none',
+                        color: '#007aff',
+                        fontSize: '15px',
+                        fontWeight: 500,
+                        transition: 'background-color 0.15s',
+                        userSelect: 'none',
+                        textAlign: 'center'
+                      }}
+                      className="veeva-menu-item"
+                    >
+                      {item.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <iframe
               ref={iframeRef}
               src={activeSlide.url}
@@ -778,6 +992,50 @@ export const Canvas: React.FC<CanvasProps> = ({
               .hide-scrollbar {
                 -ms-overflow-style: none !important;
                 scrollbar-width: none !important;
+              }
+              .veeva-menu-item:hover {
+                background-color: rgba(255, 255, 255, 0.25) !important;
+              }
+              .veeva-menu-item:active {
+                background-color: rgba(0, 0, 0, 0.05) !important;
+              }
+              .veeva-header-btn:hover {
+                opacity: 0.7;
+              }
+              .veeva-header-btn:active {
+                opacity: 0.5;
+              }
+              @keyframes veevaMenuFadeIn {
+                from { opacity: 0; transform: translateY(-5px); }
+                to { opacity: 1; transform: translateY(0); }
+              }
+              /* Instant Custom CSS Tooltips */
+              .custom-tooltip {
+                position: relative;
+              }
+              .custom-tooltip::after {
+                content: attr(data-tooltip);
+                position: absolute;
+                bottom: 125%;
+                left: 50%;
+                transform: translateX(-50%) scale(0.8);
+                background-color: rgba(15, 23, 42, 0.9);
+                color: #ffffff;
+                font-size: 9px;
+                font-weight: 700;
+                padding: 4px 8px;
+                border-radius: 6px;
+                white-space: nowrap;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.05s ease, transform 0.05s ease;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                z-index: 999999;
+              }
+              .custom-tooltip:hover::after {
+                opacity: 1;
+                transform: translateX(-50%) scale(1);
               }
             `}} />
           </div>

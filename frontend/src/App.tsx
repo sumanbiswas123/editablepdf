@@ -538,8 +538,61 @@ export const App: React.FC = () => {
       });
     });
 
+    // Global shortcuts keyboard listener (Shift+S: Save Slide, Shift+F: Full Auto, Shift+A: Auto Slide)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Guard against typing in input/textarea/select elements
+      const activeEl = document.activeElement;
+      if (activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.tagName === 'SELECT' || 
+        activeEl.getAttribute('contenteditable') === 'true'
+      )) {
+        return;
+      }
+
+      if (e.shiftKey) {
+        const key = e.key.toLowerCase();
+        if (key === 's') {
+          e.preventDefault();
+          const saveBtn = document.querySelector('button[title*="Save Current Slide"]') as HTMLButtonElement;
+          if (saveBtn && !saveBtn.disabled) saveBtn.click();
+        } else if (key === 'a') {
+          e.preventDefault();
+          const autoBtn = document.querySelector('button[title*="Auto Slide Crawl"]') as HTMLButtonElement;
+          if (autoBtn && !autoBtn.disabled) autoBtn.click();
+        } else if (key === 'f') {
+          e.preventDefault();
+          const fullBtn = document.querySelector('button[title*="Full Auto Deck"]') as HTMLButtonElement;
+          if (fullBtn && !fullBtn.disabled) fullBtn.click();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Also try to bind listener inside iframe when loaded so shortcuts work when focus is in the presentation
+    const attachIframeKeydownListener = () => {
+      try {
+        const iframe = iframeRef.current;
+        if (!iframe) return;
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (!doc) return;
+        doc.removeEventListener('keydown', handleKeyDown);
+        doc.addEventListener('keydown', handleKeyDown);
+      } catch (_) {}
+    };
+    const iframeInterval = setInterval(attachIframeKeydownListener, 1000);
+
     return () => {
       window.removeEventListener('message', handleMessage);
+      window.removeEventListener('keydown', handleKeyDown);
+      clearInterval(iframeInterval);
+      try {
+        const iframe = iframeRef.current;
+        const doc = iframe?.contentDocument || iframe?.contentWindow?.document;
+        doc?.removeEventListener('keydown', handleKeyDown);
+      } catch (_) {}
       // Clean up event listener if supported by Wails destroy
       if (typeof destroyProgressEvent === 'function') {
         destroyProgressEvent();
@@ -3593,11 +3646,14 @@ export const App: React.FC = () => {
               setPdfToDelete(null);
             }
           }}
-          theme={theme}
-          slides={slides}
-          onSelectSlide={onSelectSlide}
-          presentationId={rootDirectory.split(/[/\\]/).filter(Boolean).pop() || ''}
-        />
+           theme={theme}
+           slides={slides}
+           onSelectSlide={onSelectSlide}
+           presentationId={rootDirectory.split(/[/\\]/).filter(Boolean).pop() || ''}
+           onSaveSlide={onSaveSlide}
+           onAutoSlide={onAutoSlide}
+           onFullAuto={onFullAuto}
+         />
 
         {/* Right: Compiled outputs list & merged decks */}
         <OutputPanel
@@ -3758,68 +3814,6 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '8px', marginLeft: 'auto' }}>
-
-          <button
-            onClick={onSaveSlide}
-            disabled={currentSlideIndex === -1 || isCompiling}
-            style={{
-              backgroundColor: 'var(--accent-dim)',
-              border: '1px solid var(--border-accent)',
-              color: 'var(--accent)',
-              padding: '6px 14px',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '11px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              transition: 'all var(--transition)',
-              boxShadow: '0 2px 8px rgba(var(--accent-rgb), 0.05)'
-            }}
-            className="action-btn"
-          >
-            Save Slide
-          </button>
-
-          <button
-            onClick={onAutoSlide}
-            disabled={currentSlideIndex === -1 || isCompiling}
-            style={{
-              backgroundColor: 'var(--purple-dim)',
-              border: '1px solid var(--purple-mid)',
-              color: 'var(--purple)',
-              padding: '6px 14px',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '11px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              transition: 'all var(--transition)',
-              boxShadow: '0 2px 8px rgba(139, 92, 246, 0.05)'
-            }}
-            className="action-btn"
-          >
-            Auto Slide
-          </button>
-
-          <button
-            onClick={onFullAuto}
-            disabled={slides.length === 0 || isCompiling}
-            style={{
-              background: 'linear-gradient(135deg, var(--accent), var(--blue))',
-              border: 'none',
-              color: 'var(--bg-deep)',
-              padding: '6px 16px',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '11px',
-              fontWeight: 800,
-              cursor: 'pointer',
-              boxShadow: '0 3px 10px rgba(var(--accent-rgb), 0.25)',
-              transition: 'all var(--transition)'
-            }}
-            className="action-btn"
-          >
-            Full Auto
-          </button>
-        </div>
       </div>
 
       {/* 5. Fullscreen PDF Viewer Overlay */}

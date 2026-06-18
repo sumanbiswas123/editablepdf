@@ -695,7 +695,7 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
           container.style.cssText = 'position: fixed; inset: 0px; pointer-events: none; z-index: 999998;';
           container.innerHTML = ' \
             <div style="position: absolute; top: 6px; left: 7px; display: flex; align-items: center; gap: 8px; pointer-events: auto;"> \
-              <img src="BASE64_WHITE_DOTS" style="height: 14px; width: auto; object-fit: contain;" /> \
+              <img id="epdf-three-dots-btn" class="epdf-three-dot" src="BASE64_WHITE_DOTS" style="height: 14px; width: auto; object-fit: contain; cursor: pointer;" /> \
               <img src="BASE64_PENCIL" style="height: 27px; width: auto; object-fit: contain;" /> \
               <img src="BASE64_ARROWS" style="height: 15px; width: auto; object-fit: contain;" /> \
             </div> \
@@ -707,6 +707,15 @@ func (a *App) startLocalServer(dirPath string) (int, error) {
             </div> \
           ';
           target.appendChild(container);
+
+          var threeDotsBtn = container.querySelector('#epdf-three-dots-btn');
+          if (threeDotsBtn) {
+            threeDotsBtn.onclick = function() {
+              try {
+                window.parent.postMessage({ type: 'epdf_toggle_veeva_menu' }, '*');
+              } catch (_) {}
+            };
+          }
 
           var stackBtn = container.querySelector('#epdf-stack-btn');
           if (stackBtn) {
@@ -1108,14 +1117,29 @@ func (a *App) CompileScreenshot(job ExportJob, outputPath string, sleepMs int) (
 		tempFile = filepath.Base(renderUrl)
 	}
 
+	// Determine dimensions based on folder, slide name, or URL containing "vertical"
+	width := int64(1024)
+	height := int64(768)
+	orientation := emulation.OrientationTypeLandscapePrimary
+	angle := int64(90)
+
+	if strings.Contains(strings.ToLower(job.FolderName), "vertical") ||
+		strings.Contains(strings.ToLower(job.SlideName), "vertical") ||
+		strings.Contains(strings.ToLower(renderUrl), "vertical") {
+		width = 768
+		height = 1024
+		orientation = emulation.OrientationTypePortraitPrimary
+		angle = 0
+	}
+
 	// Capture visual screenshot using chromedp
 	var buf []byte
 	err := chromedp.Run(ctx,
-		// Lock viewport to 1024x768
-		emulation.SetDeviceMetricsOverride(1024, 768, 1, false).
+		// Lock viewport to dimensions
+		emulation.SetDeviceMetricsOverride(width, height, 1, false).
 			WithScreenOrientation(&emulation.ScreenOrientation{
-				Type:  emulation.OrientationTypeLandscapePrimary,
-				Angle: 90,
+				Type:  orientation,
+				Angle: angle,
 			}),
 		chromedp.Navigate(renderUrl),
 		chromedp.WaitReady("body"),
@@ -1240,18 +1264,37 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 		// Filepath to save individual page PDF
 		pdfPath := filepath.Join(tempDir, fmt.Sprintf("slide_%03d.pdf", idx))
 
-		// Execute page loading, locking 1024x768 viewport, and printing to PDF
+		// Determine dimensions based on folder, slide name, or URL containing "vertical"
+		width := int64(1024)
+		height := int64(768)
+		paperWidth := 10.66
+		paperHeight := 8.00
+		orientation := emulation.OrientationTypeLandscapePrimary
+		angle := int64(90)
+
+		if strings.Contains(strings.ToLower(job.FolderName), "vertical") ||
+			strings.Contains(strings.ToLower(job.SlideName), "vertical") ||
+			strings.Contains(strings.ToLower(renderUrl), "vertical") {
+			width = 768
+			height = 1024
+			paperWidth = 8.00
+			paperHeight = 10.66
+			orientation = emulation.OrientationTypePortraitPrimary
+			angle = 0
+		}
+
+		// Execute page loading, locking viewport, and printing to PDF
 		var buf []byte
 		var screenshotBuf []byte
 
 		actions := []chromedp.Action{
 			// Force screen media emulation to render screen-specific layouts, fonts, backgrounds, and pseudo-elements
 			emulation.SetEmulatedMedia().WithMedia("screen"),
-			// Lock viewport to 1024x768 to prevent layout shifts
-			emulation.SetDeviceMetricsOverride(1024, 768, 1, false).
+			// Lock viewport to dimensions to prevent layout shifts
+			emulation.SetDeviceMetricsOverride(width, height, 1, false).
 				WithScreenOrientation(&emulation.ScreenOrientation{
-					Type:  emulation.OrientationTypeLandscapePrimary,
-					Angle: 90,
+					Type:  orientation,
+					Angle: angle,
 				}),
 			chromedp.Navigate(renderUrl),
 			// Wait for body to be loaded
@@ -1574,11 +1617,11 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 		actions = append(actions,
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				var err error
-				// Print to 10.66 x 8.00 in (perfect 1024x768px at 96 DPI aspect ratio) with zero margins
+				// Print to perfect aspect ratio with zero margins
 				buf, _, err = page.PrintToPDF().
 					WithPrintBackground(true).
-					WithPaperWidth(10.66).
-					WithPaperHeight(8.00).
+					WithPaperWidth(paperWidth).
+					WithPaperHeight(paperHeight).
 					WithMarginTop(0).
 					WithMarginBottom(0).
 					WithMarginLeft(0).

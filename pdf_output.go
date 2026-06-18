@@ -2579,14 +2579,26 @@ func (a *App) AutomateActiveSlide(slideFolder string, sleepMs int) (string, erro
 	return outputPath, nil
 }
 
-// navigateAndSettle forces screen media emulation, locks to landscape 1024x768, navigates to the URL, and waits for settlement.
+// navigateAndSettle forces screen media emulation, locks to landscape or portrait based on URL, navigates to the URL, and waits for settlement.
 func (a *App) navigateAndSettle(ctx context.Context, url string, sleepMs int) error {
+	width := int64(1024)
+	height := int64(768)
+	orientation := emulation.OrientationTypeLandscapePrimary
+	angle := int64(90)
+
+	if strings.Contains(strings.ToLower(url), "vertical") {
+		width = 768
+		height = 1024
+		orientation = emulation.OrientationTypePortraitPrimary
+		angle = 0
+	}
+
 	return chromedp.Run(ctx,
 		emulation.SetEmulatedMedia().WithMedia("screen"),
-		emulation.SetDeviceMetricsOverride(1024, 768, 1, false).
+		emulation.SetDeviceMetricsOverride(width, height, 1, false).
 			WithScreenOrientation(&emulation.ScreenOrientation{
-				Type:  emulation.OrientationTypeLandscapePrimary,
-				Angle: 90,
+				Type:  orientation,
+				Angle: angle,
 			}),
 		chromedp.Navigate(url),
 		chromedp.WaitReady("body"),
