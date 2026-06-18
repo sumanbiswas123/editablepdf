@@ -67,7 +67,7 @@ export class ExportJob {
      */
     "tempFilename": string;
 
-    "isSwimlane": boolean;
+    "isSwimlane"?: boolean;
 
     /** Creates a new ExportJob instance. */
     constructor($$source: Partial<ExportJob> = {}) {
