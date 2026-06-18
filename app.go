@@ -266,6 +266,7 @@ func (a *App) StartWSClient(serverURL, room, mode string) error {
 	if err != nil {
 		return err
 	}
+	conn.SetReadLimit(50 << 20) // Set read limit to 50MiB to handle large deck payloads
 
 	wsc := &WSConnection{
 		conn:     conn,

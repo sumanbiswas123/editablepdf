@@ -761,7 +761,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               title={activeSlide.name}
             />
 
-        {isSingleSave && (
+        {(isSingleSave || isCompiling) && (
           <div className="material-spinner-overlay">
             <div className="spinner-card">
               <div className="material-spinner">
