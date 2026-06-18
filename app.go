@@ -501,6 +501,7 @@ func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{},
 			if v, ok := m["folderName"].(string); ok { job.FolderName = v }
 			if v, ok := m["url"].(string); ok { job.URL = v }
 			if v, ok := m["customHtml"].(string); ok { job.CustomHTML = v }
+			if v, ok := m["isSwimlane"].(bool); ok { job.IsSwimlane = v }
 			jobs = append(jobs, job)
 		}
 	}
@@ -1251,9 +1252,9 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 			a.app.Event.Emit( "viewership_event", fmt.Sprintf("Navigating to URL: %s", renderUrl))
 		}
 
-		// If custom interactive state HTML is provided, write it temporarily
+		// If custom interactive state HTML is provided, write it temporarily (only if workspace path is set locally)
 		var tempFile string
-		if job.CustomHTML != "" {
+		if job.CustomHTML != "" && a.currentDir != "" {
 			var err error
 			renderUrl, err = a.CaptureCustomStateHTML(job.FolderName, job.CustomHTML)
 			if err != nil {
@@ -1288,11 +1289,16 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 		var buf []byte
 		var screenshotBuf []byte
 
+		deviceScaleFactor := float64(1)
+		if job.IsSwimlane {
+			deviceScaleFactor = 3 // 3x Retina scale for crisp screenshots
+		}
+
 		actions := []chromedp.Action{
 			// Force screen media emulation to render screen-specific layouts, fonts, backgrounds, and pseudo-elements
 			emulation.SetEmulatedMedia().WithMedia("screen"),
 			// Lock viewport to dimensions to prevent layout shifts
-			emulation.SetDeviceMetricsOverride(width, height, 1, false).
+			emulation.SetDeviceMetricsOverride(width, height, deviceScaleFactor, false).
 				WithScreenOrientation(&emulation.ScreenOrientation{
 					Type:  orientation,
 					Angle: angle,
@@ -1302,6 +1308,26 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 			chromedp.WaitReady("body"),
 			// Settle time for custom transitions or web fonts
 			chromedp.Sleep(time.Duration(sleepMs) * time.Millisecond),
+		}
+
+		if job.CustomHTML != "" && a.currentDir == "" {
+			// Strip/freeze the HTML in Go
+			reScript := regexp.MustCompile(`(?s)<script.*?>.*?</script>`)
+			frozen := reScript.ReplaceAllString(job.CustomHTML, "")
+			reOnload := regexp.MustCompile(`(?i)\s(onload|onerror|onclick)\s*=\s*"[^"]*"`)
+			frozen = reOnload.ReplaceAllString(frozen, "")
+
+			actions = append(actions,
+				chromedp.ActionFunc(func(ctx context.Context) error {
+					jsScript := fmt.Sprintf(`(function() {
+						document.open();
+						document.write(%q);
+						document.close();
+					})()`, frozen)
+					return chromedp.Evaluate(jsScript, nil).Do(ctx)
+				}),
+				chromedp.Sleep(200 * time.Millisecond), // Settle down after document.write
+			)
 		}
 
 		// Set document title with JSON metadata of slide/popup details so Chrome embeds it into PDF metadata
@@ -1610,6 +1636,33 @@ func (a *App) CompileSlidesToPDFForRoom(roomCode string, jobs []ExportJob, outpu
 						return "restored";
 					})()`, base64Str)
 					return chromedp.Evaluate(jsScript, nil).Do(ctx)
+				}),
+			)
+		}
+
+		if job.IsSwimlane {
+			actions = append(actions,
+				chromedp.ActionFunc(func(ctx context.Context) error {
+					var screenshotBuf []byte
+					if err := chromedp.CaptureScreenshot(&screenshotBuf).Do(ctx); err != nil {
+						return fmt.Errorf("failed to take swimlane screenshot: %w", err)
+					}
+
+					base64Str := "data:image/png;base64," + base64.StdEncoding.EncodeToString(screenshotBuf)
+
+					jsScript := fmt.Sprintf(`(function() {
+						document.documentElement.style.cssText = "margin:0; padding:0; width:100%%; height:100%%; overflow:hidden;";
+						document.body.style.cssText = "margin:0; padding:0; width:100%%; height:100%%; overflow:hidden;";
+						document.body.innerHTML = '<img src="%s" style="width:100%%; height:100%%; object-fit:fill; display:block; margin:0; padding:0;" />';
+					})()`, base64Str)
+
+					if err := chromedp.Evaluate(jsScript, nil).Do(ctx); err != nil {
+						return fmt.Errorf("failed to replace document with screenshot: %w", err)
+					}
+
+					// Wait a tiny bit for Chrome to process the base64 image injection
+					time.Sleep(150 * time.Millisecond)
+					return nil
 				}),
 			)
 		}
