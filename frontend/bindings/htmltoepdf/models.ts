@@ -67,6 +67,8 @@ export class ExportJob {
      */
     "tempFilename": string;
 
+    "isSwimlane": boolean;
+
     /** Creates a new ExportJob instance. */
     constructor($$source: Partial<ExportJob> = {}) {
         if (!("slideName" in $$source)) {
@@ -83,6 +85,9 @@ export class ExportJob {
         }
         if (!("tempFilename" in $$source)) {
             this["tempFilename"] = "";
+        }
+        if (!("isSwimlane" in $$source)) {
+            this["isSwimlane"] = false;
         }
 
         Object.assign(this, $$source);

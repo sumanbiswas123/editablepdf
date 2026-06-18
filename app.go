@@ -1181,6 +1181,7 @@ type ExportJob struct {
 	URL          string `json:"url"`
 	CustomHTML   string `json:"customHtml"`   // Optional custom interactive DOM state
 	TempFilename string `json:"tempFilename"` // Kept for cleanup
+	IsSwimlane   bool   `json:"isSwimlane"`   // Flag indicating if this is a swimlane capture
 }
 
 func (a *App) CompileSlidesToPDF(jobs []ExportJob, outputPath string, sleepMs int) (string, error) {

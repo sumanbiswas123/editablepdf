@@ -431,6 +431,9 @@ export const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Overlays / Modals States
+  const [showBottomBar, setShowBottomBar] = useState(false);
+  const [showVeevaMenu, setShowVeevaMenu] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
   const [activeViewerPDF, setActiveViewerPDF] = useState<CompiledPDF | null>(null);
   const [activeMetadataPDF, setActiveMetadataPDF] = useState<CompiledPDF | null>(null);
   const [pdfToDelete, setPdfToDelete] = useState<{ name: string; type: 'single' | 'deck' } | null>(null);
@@ -989,6 +992,185 @@ export const App: React.FC = () => {
     });
   };
 
+  const captureAndCompileStateGlobal = async (slide: Slide, desc: string, settleMs = 800) => {
+    const isBottomNav = desc.includes("Bottom Navigation");
+    const isActionMenu = desc.includes("Action Menu");
+
+    if (isBottomNav || isActionMenu) {
+      // ── OVERLAY CAPTURE: inject into live iframe DOM exactly like epdf-overlay-container ──
+
+      // 1. Clone the React overlay panel from the parent React window
+      const panelId = isBottomNav ? 'bottom-slides-panel' : 'veeva-menu-panel';
+      const parentPanel = document.getElementById(panelId);
+      if (!parentPanel) {
+        console.warn(`[Swimlane] Panel #${panelId} not found — skipping`);
+        return;
+      }
+
+      const cloned = parentPanel.cloneNode(true) as HTMLElement;
+
+      // 2. Fix positioning so it sits correctly over the 1024×768 slide
+      if (isBottomNav) {
+        cloned.style.setProperty('transform', 'translateY(0)', 'important');
+        cloned.style.setProperty('position', 'fixed', 'important');
+        cloned.style.setProperty('bottom', '0', 'important');
+        cloned.style.setProperty('left', '0', 'important');
+        cloned.style.setProperty('right', '0', 'important');
+        cloned.style.setProperty('width', '1024px', 'important');
+        cloned.style.setProperty('z-index', '2147483647', 'important');
+      } else {
+        cloned.style.setProperty('position', 'fixed', 'important');
+        cloned.style.setProperty('top', '45px', 'important');
+        cloned.style.setProperty('left', '17px', 'important');
+        cloned.style.setProperty('z-index', '2147483647', 'important');
+        // Remove invisible click-outside backdrop (only needed in React UI)
+        const backdrop = cloned.querySelector<HTMLElement>('div[style*="position: fixed"]');
+        if (backdrop) backdrop.remove();
+      }
+
+      // 3. Convert ALL thumbnail img srcs → base64 data URIs so images survive iframe injection
+      const imgEls = Array.from(cloned.querySelectorAll('img'));
+      await Promise.all(imgEls.map(async (img) => {
+        const src = (img as HTMLImageElement).src;
+        if (!src || src.startsWith('data:')) return;
+        try {
+          const res = await fetch(src);
+          const blob = await res.blob();
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          (img as HTMLImageElement).src = b64;
+        } catch (_) { /* keep original src on failure */ }
+      }));
+
+      // 4. Collect all CSS rules from parent app stylesheets and inline them
+      let inlinedCss = '';
+      Array.from(document.styleSheets).forEach(sheet => {
+        try {
+          Array.from(sheet.cssRules || sheet.rules || []).forEach(rule => {
+            inlinedCss += rule.cssText + '\n';
+          });
+        } catch (_) { /* cross-origin stylesheet — skip */ }
+      });
+
+      const overlayHtml = cloned.outerHTML;
+      const styleId = 'epdf-swimlane-styles';
+      const overlayId = isBottomNav ? 'epdf-bottom-nav-overlay' : 'epdf-veeva-menu-overlay';
+
+      // 5. Inject <style> + overlay element directly into live iframe DOM
+      //    via the postMessage iframe_execute bridge — no CORS, same as epdf-overlay-container
+      await executeInIframe(`(function() {
+        if (!document.getElementById(${JSON.stringify(styleId)})) {
+          var styleEl = document.createElement('style');
+          styleEl.id = ${JSON.stringify(styleId)};
+          styleEl.textContent = ${JSON.stringify(inlinedCss)};
+          (document.head || document.documentElement).appendChild(styleEl);
+        }
+        var prev = document.getElementById(${JSON.stringify(overlayId)});
+        if (prev) prev.remove();
+        var wrapper = document.createElement('div');
+        wrapper.innerHTML = ${JSON.stringify(overlayHtml)};
+        var overlayEl = wrapper.firstElementChild;
+        if (overlayEl) {
+          overlayEl.id = ${JSON.stringify(overlayId)};
+          document.body.appendChild(overlayEl);
+        }
+      })()`);
+
+      // 6. Short settle so layout/images finish rendering
+      await new Promise(r => setTimeout(r, 500));
+
+      // 7. Capture the full iframe outerHTML — overlay is now baked in
+      const html = await captureCurrentSlideState();
+
+      // 8. Clean up — remove injected overlay so it doesn't affect future captures
+      await executeInIframe(`(function() {
+        var o = document.getElementById(${JSON.stringify(overlayId)});
+        if (o) o.remove();
+        var s = document.getElementById(${JSON.stringify(styleId)});
+        if (s) s.remove();
+      })()`);
+
+      if (!html) return;
+
+      let renderUrl = slide.url;
+      try {
+        const tempUrl = await CaptureCustomStateHTML(slide.folderName, html);
+        const localIP = windowsIP || '127.0.0.1';
+        renderUrl = tempUrl.replace('127.0.0.1', localIP).replace('localhost', localIP);
+        const filename = tempUrl.substring(tempUrl.lastIndexOf('/') + 1);
+        pendingCleanupsRef.current.push({ folder: slide.folderName, file: filename });
+      } catch (writeErr) {
+        console.warn("Failed to write state HTML, falling back to direct URL:", writeErr);
+      }
+
+      setCompilationProgress((prev) => ({
+        phase: prev?.phase || 'crawling',
+        current: prev?.current ?? 0,
+        total: prev?.total ?? 100,
+        slide: slide.name,
+        detail: `📸 Rendering PDF: ${desc}...`
+      }));
+
+      const job = {
+        slideName: slide.name,
+        folderName: slide.folderName,
+        url: renderUrl,
+        customHtml: html,
+        tempFilename: '',
+        isSwimlane: true
+      };
+
+      if (appMode === 'capture') {
+        remoteJobsRef.current.push(job);
+      } else {
+        await CompileSingleStateToPDF(job, settleMs);
+      }
+
+    } else {
+      // ── REGULAR SLIDE: capture live DOM directly from iframe, no overlay needed ──
+      const html = await captureCurrentSlideState();
+      if (!html) return;
+
+      let renderUrl = slide.url;
+      try {
+        const tempUrl = await CaptureCustomStateHTML(slide.folderName, html);
+        const localIP = windowsIP || '127.0.0.1';
+        renderUrl = tempUrl.replace('127.0.0.1', localIP).replace('localhost', localIP);
+        const filename = tempUrl.substring(tempUrl.lastIndexOf('/') + 1);
+        pendingCleanupsRef.current.push({ folder: slide.folderName, file: filename });
+      } catch (writeErr) {
+        console.warn("Failed to write state HTML, falling back to direct URL:", writeErr);
+      }
+
+      setCompilationProgress((prev) => ({
+        phase: prev?.phase || 'crawling',
+        current: prev?.current ?? 0,
+        total: prev?.total ?? 100,
+        slide: slide.name,
+        detail: `📸 Rendering PDF: ${desc}...`
+      }));
+
+      const job = {
+        slideName: slide.name,
+        folderName: slide.folderName,
+        url: renderUrl,
+        customHtml: html,
+        tempFilename: '',
+        isSwimlane: false
+      };
+
+      if (appMode === 'capture') {
+        remoteJobsRef.current.push(job);
+      } else {
+        await CompileSingleStateToPDF(job, settleMs);
+      }
+    }
+  };
+
   // Automate Slide state transitions (crawls tabs, dots, dialogue triggers) and captures PDFs
   const automateOneSlideViaIframe = async (
     slide: Slide,
@@ -1056,64 +1238,7 @@ export const App: React.FC = () => {
     };
 
     const captureAndCompileState = async (desc: string) => {
-      const statusStr = await executeInIframe(`(function() {
-        var nav = document.querySelector('.navBottom');
-        var bnav = document.querySelector('.bottomnav');
-        var statusStr = "PDF CRAWLER STATE [${desc}]:";
-        if (!nav) {
-          statusStr += " [navBottom NOT FOUND]";
-        } else {
-          var cs = window.getComputedStyle(nav);
-          statusStr += " [navBottom parent=" + nav.parentNode.tagName + (nav.parentNode.id ? "#" + nav.parentNode.id : "") + " display=" + cs.display + " visibility=" + cs.visibility + " opacity=" + cs.opacity + " zIndex=" + cs.zIndex + "]";
-        }
-        if (!bnav) {
-          statusStr += " [bottomnav NOT FOUND]";
-        } else {
-          var cs2 = window.getComputedStyle(bnav);
-          statusStr += " [bottomnav parent=" + bnav.parentNode.tagName + " display=" + cs2.display + " visibility=" + cs2.visibility + " opacity=" + cs2.opacity + " zIndex=" + cs2.zIndex + "]";
-        }
-        return statusStr;
-      })()`);
-
-      console.log(statusStr);
-      try {
-        await (window as any).go.main.App.LogCrawlerStatus(statusStr);
-      } catch (_) {}
-
-      const html = await captureCurrentSlideState();
-      if (!html) return;
-
-      let renderUrl = slide.url;
-      if (html && appMode === 'capture') {
-        try {
-          const tempUrl = await CaptureCustomStateHTML(slide.folderName, html);
-          const localIP = windowsIP || '127.0.0.1';
-          renderUrl = tempUrl.replace('127.0.0.1', localIP).replace('localhost', localIP);
-          
-          const filename = tempUrl.substring(tempUrl.lastIndexOf('/') + 1);
-          pendingCleanupsRef.current.push({
-            folder: slide.folderName,
-            file: filename
-          });
-        } catch (writeErr) {
-          console.warn("Failed to write state HTML locally on Windows, falling back to direct URL:", writeErr);
-        }
-      }
-
-      const job = {
-        slideName: slide.name,
-        folderName: slide.folderName,
-        url: renderUrl,
-        customHtml: appMode === 'capture' ? '' : html,
-        tempFilename: ''
-      };
-
-      updateProgress(`📸 Rendering PDF: ${desc}...`);
-      if (appMode === 'capture') {
-        remoteJobsRef.current.push(job);
-      } else {
-        await CompileSingleStateToPDF(job, settleMs);
-      }
+      await captureAndCompileStateGlobal(slide, desc, settleMs);
     };
 
     // Load slide once
@@ -2562,6 +2687,15 @@ export const App: React.FC = () => {
 
     try {
       setIsCompiling(true);
+      const updateProgress = (detail: string) => {
+        setCompilationProgress((prev) => ({
+          phase: 'crawling',
+          current: prev?.current ?? slides.length,
+          total: prev?.total ?? (slides.length + 2),
+          slide: slides[0]?.name || 'Deck',
+          detail
+        }));
+      };
       remoteJobsRef.current = [];
       pendingCleanupsRef.current = [];
       
@@ -2623,13 +2757,24 @@ export const App: React.FC = () => {
           setCurrentSlideIndex(0);
           await new Promise((r) => setTimeout(r, sleepMs + 400));
 
+          if (appMode !== 'capture') {
+            await StartPDFSession();
+          }
+
           // 1. Open the slides section (bottom slider bar) and capture it
           updateProgress("🔄 Opening bottom navigation section...");
           setShowBottomBar(true);
           await new Promise((r) => setTimeout(r, sleepMs));
           
-          updateProgress("📸 Capturing bottom navigation section...");
-          await captureAndCompileState("Bottom Navigation (Slides Open)");
+          const totalPages = slides.length <= 8 ? 1 : 1 + Math.ceil((slides.length - 8) / 7);
+          for (let pIdx = 0; pIdx < totalPages; pIdx++) {
+            updateProgress(`🔄 Scrolling bottom navigation to page ${pIdx + 1}/${totalPages}...`);
+            setCurrentPage(pIdx);
+            await new Promise((r) => setTimeout(r, 600));
+
+            updateProgress(`📸 Capturing bottom navigation page ${pIdx + 1}/${totalPages}...`);
+            await captureAndCompileStateGlobal(firstSlide, `Bottom Navigation (Page ${pIdx + 1})`, sleepMs);
+          }
           
           // Close bottom navigation section
           setShowBottomBar(false);
@@ -2641,15 +2786,23 @@ export const App: React.FC = () => {
           await new Promise((r) => setTimeout(r, sleepMs));
 
           updateProgress("📸 Capturing action menu popup...");
-          await captureAndCompileState("Action Menu (Open)");
+          await captureAndCompileStateGlobal(firstSlide, "Action Menu (Open)", sleepMs);
 
           // Close action menu
           setShowVeevaMenu(false);
           await new Promise((r) => setTimeout(r, 400));
+
+          if (appMode !== 'capture') {
+            const savePath = await GenerateNextAutoSlidePDFPath(slides.length);
+            await EndPDFSession(savePath);
+          }
         } catch (overlayErr) {
           console.warn("Failed to capture bottom bar / action menu overlays on first slide:", overlayErr);
           setShowBottomBar(false);
           setShowVeevaMenu(false);
+          if (appMode !== 'capture') {
+            try { await EndPDFSession(""); } catch (_) {}
+          }
         }
       }
 
@@ -2722,6 +2875,155 @@ export const App: React.FC = () => {
     } catch (err: any) {
       console.error('Full Auto compilation failed:', err);
       alert(`Full Auto failed: ${err.message || err}`);
+      setIsCompiling(false);
+      setCompilationProgress(null);
+    }
+  };
+
+  const onCaptureSwimlane = async () => {
+    if (slides.length === 0 || isCompiling) return;
+
+    if (appMode === 'capture') {
+      if (wsConnectionState !== 'connected' || !controllerWS) {
+        alert("Please connect to Mac Viewership first.");
+        return;
+      }
+    }
+
+    try {
+      setIsCompiling(true);
+      const updateProgress = (detail: string) => {
+        setCompilationProgress((prev) => ({
+          phase: 'crawling',
+          current: prev?.current ?? 0,
+          total: prev?.total ?? 2,
+          slide: slides[0]?.name || 'Deck',
+          detail
+        }));
+      };
+      remoteJobsRef.current = [];
+      pendingCleanupsRef.current = [];
+      
+      setCompilationProgress({
+        phase: 'crawling',
+        current: 0,
+        total: 2,
+        slide: slides[0].name,
+        detail: 'Navigating to first slide...'
+      });
+
+      setCurrentSlideIndex(0);
+      await new Promise((r) => setTimeout(r, sleepMs + 400));
+
+      const slide = slides[0];
+
+      if (appMode !== 'capture') {
+        await StartPDFSession();
+      }
+
+      // 1. Open bottom navigation (Slides) and capture
+      updateProgress("🔄 Opening bottom navigation section...");
+      setShowBottomBar(true);
+      await new Promise((r) => setTimeout(r, sleepMs));
+
+      const totalPages = slides.length <= 8 ? 1 : 1 + Math.ceil((slides.length - 8) / 7);
+      for (let pIdx = 0; pIdx < totalPages; pIdx++) {
+        updateProgress(`🔄 Scrolling bottom navigation to page ${pIdx + 1}/${totalPages}...`);
+        setCurrentPage(pIdx);
+        await new Promise((r) => setTimeout(r, 600));
+
+        updateProgress(`📸 Capturing bottom navigation page ${pIdx + 1}/${totalPages}...`);
+        await captureAndCompileStateGlobal(slide, `Bottom Navigation (Page ${pIdx + 1})`, sleepMs);
+      }
+
+      // Close bottom navigation section
+      setShowBottomBar(false);
+      await new Promise((r) => setTimeout(r, 400));
+
+      // 2. Open the Veeva Action Menu and capture
+      updateProgress("🔄 Opening Veeva CRM action menu...");
+      setShowVeevaMenu(true);
+      await new Promise((r) => setTimeout(r, sleepMs));
+
+      updateProgress("📸 Capturing action menu popup...");
+      await captureAndCompileStateGlobal(slide, "Action Menu (Open)", sleepMs);
+
+      // Close action menu
+      setShowVeevaMenu(false);
+      await new Promise((r) => setTimeout(r, 400));
+
+      if (appMode !== 'capture') {
+        const savePath = await GenerateNextAutoSlidePDFPath(999);
+        await EndPDFSession(savePath);
+      }
+
+      if (appMode === 'capture') {
+        setCompilationProgress({
+          phase: 'merging',
+          current: 95,
+          total: 100,
+          slide: 'Preparing overlays batch...',
+          detail: 'Mapping state resources to LAN IP...'
+        });
+
+        const resolvedJobs = [];
+        for (let i = 0; i < remoteJobsRef.current.length; i++) {
+          const j = remoteJobsRef.current[i];
+          resolvedJobs.push({
+            ...j,
+            url: j.url,
+            customHtml: j.customHtml,
+            tempFilename: ''
+          });
+        }
+
+        setCompilationProgress({
+          phase: 'merging',
+          current: 95,
+          total: 100,
+          slide: 'Sending batch to Mac Performer...',
+          detail: 'Requesting Safari rendering on Mac...'
+        });
+
+        const presentationId = rootDirectory.split(/[/\\]/).filter(Boolean).pop() || 'deck';
+        remoteFilenameRef.current = `${presentationId}_swimlane_overlays.pdf`;
+
+        controllerWS?.send(JSON.stringify({
+          type: 'render_request',
+          jobs: resolvedJobs
+        }));
+        remoteJobsRef.current = [];
+      } else {
+        setCompilationProgress({
+          phase: 'merging',
+          current: 95,
+          total: 100,
+          slide: 'Stitching presentation pages...',
+          detail: 'Combining compiled PDF slices...'
+        });
+
+        await CombineCompiledPDFs();
+
+        setCompilationProgress({
+          phase: 'complete',
+          current: 100,
+          total: 100,
+          slide: 'Overlays Compiled',
+          detail: 'Swimlane overlays compiled successfully.'
+        });
+
+        await refreshPDFList();
+        setIsCompiling(false);
+        setCompilationProgress(null);
+      }
+
+      setCurrentSlideIndex(0);
+
+      const downloadHelper = (window as any).downloadCrawlerLogs;
+      if (downloadHelper) downloadHelper();
+    } catch (err: any) {
+      console.error('Swimlane overlays compilation failed:', err);
+      alert(`Swimlane capture failed: ${err.message || err}`);
       setIsCompiling(false);
       setCompilationProgress(null);
     }
@@ -3714,6 +4016,13 @@ export const App: React.FC = () => {
            onSaveSlide={onSaveSlide}
            onAutoSlide={onAutoSlide}
            onFullAuto={onFullAuto}
+           onCaptureSwimlane={onCaptureSwimlane}
+           showBottomBar={showBottomBar}
+           setShowBottomBar={setShowBottomBar}
+           showVeevaMenu={showVeevaMenu}
+           setShowVeevaMenu={setShowVeevaMenu}
+           currentPage={currentPage}
+           setCurrentPage={setCurrentPage}
          />
 
         {/* Right: Compiled outputs list & merged decks */}

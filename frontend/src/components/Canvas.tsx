@@ -36,6 +36,13 @@ interface CanvasProps {
   onSaveSlide?: () => void;
   onAutoSlide?: () => void;
   onFullAuto?: () => void;
+  onCaptureSwimlane?: () => void;
+  showBottomBar: boolean;
+  setShowBottomBar: React.Dispatch<React.SetStateAction<boolean>>;
+  showVeevaMenu: boolean;
+  setShowVeevaMenu: React.Dispatch<React.SetStateAction<boolean>>;
+  currentPage: number;
+  setCurrentPage: React.Dispatch<React.SetStateAction<number>>;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -59,6 +66,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   onSaveSlide,
   onAutoSlide,
   onFullAuto,
+  onCaptureSwimlane,
+  showBottomBar,
+  setShowBottomBar,
+  showVeevaMenu,
+  setShowVeevaMenu,
+  currentPage,
+  setCurrentPage,
 }) => {
   if (!activeSlide) {
     return (
@@ -103,10 +117,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = React.useState({ width: 1024, height: 768 });
 
-  const [showBottomBar, setShowBottomBar] = React.useState(false);
-  const [showVeevaMenu, setShowVeevaMenu] = React.useState(false);
   const thumbsContainerRef = React.useRef<HTMLDivElement>(null);
-  const [currentPage, setCurrentPage] = React.useState(0);
   const currentPageRef = React.useRef(0);      // always up-to-date, safe inside event listeners
   const [isDragging, setIsDragging] = React.useState(false);
   const [isApproved, setIsApproved] = React.useState(false);
@@ -212,6 +223,19 @@ export const Canvas: React.FC<CanvasProps> = ({
       }
     }
   }, [currentSlideIndex, totalPages, thumbWidth]);
+
+  // Scroll to current page when currentPage changes (lifted state)
+  React.useEffect(() => {
+    if (thumbsContainerRef.current) {
+      const scrollTarget = getScrollForPage(currentPage, thumbWidth);
+      if (Math.abs(thumbsContainerRef.current.scrollLeft - scrollTarget) > 5) {
+        thumbsContainerRef.current.scrollTo({
+          left: scrollTarget,
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [currentPage, thumbWidth]);
 
   const handleScroll = () => {
     if (!thumbsContainerRef.current) return;
@@ -510,10 +534,7 @@ export const Canvas: React.FC<CanvasProps> = ({
  
        {currentSlideIndex === 0 && (
          <button
-           onClick={() => {
-             setShowBottomBar(prev => !prev);
-             setShowVeevaMenu(prev => !prev);
-           }}
+           onClick={onCaptureSwimlane}
            className="glass-panel nav-btn custom-tooltip"
            data-tooltip="Shift + H"
            data-action="capture-swimlane"
@@ -638,7 +659,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             </div>
             {/* Dropdown Menu (connected to slide's built-in header click) */}
             {showVeevaMenu && (
-              <div style={{
+              <div
+                id="veeva-menu-panel"
+                style={{
                 position: 'absolute',
                 top: '45px',
                 left: '17px',
@@ -766,7 +789,9 @@ export const Canvas: React.FC<CanvasProps> = ({
           </div>
         )}
             {/* Bottom Presentation Slider Panel */}
-            <div style={{
+            <div
+              id="bottom-slides-panel"
+              style={{
               position: 'absolute',
               bottom: 0,
               left: 0,
