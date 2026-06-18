@@ -464,6 +464,11 @@ func (a *App) handleRenderRequest(jobsRaw interface{}, requester string) {
 
 func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{}, requester string) {
 	roomCode := wsc.roomCode
+	
+	// Pause the room timeout timer while active rendering/compiling is ongoing
+	SetRoomRenderingState(roomCode, true)
+	defer SetRoomRenderingState(roomCode, false)
+
 	a.emitViewershipEvent(roomCode, fmt.Sprintf("Received render request from client %s", requester))
 	
 	rawSlice, ok := jobsRaw.([]interface{})

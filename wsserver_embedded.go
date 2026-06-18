@@ -47,12 +47,13 @@ type WSClient struct {
 var MaxRooms = 10
 
 type WSRoom struct {
-	id        string
-	clients   map[string]*WSClient
-	mu        sync.Mutex
-	owner     string // client id of mac that owns this paired device room
-	srv       *WSServer
-	createdAt time.Time
+	id          string
+	clients     map[string]*WSClient
+	mu          sync.Mutex
+	owner       string // client id of mac that owns this paired device room
+	srv         *WSServer
+	createdAt   time.Time
+	isRendering bool // flag to pause room timeout during compilation/rendering
 }
 
 type WSServer struct {
@@ -331,6 +332,7 @@ func (c *WSClient) readPump() {
 		if err := c.conn.ReadJSON(&msg); err != nil {
 			break
 		}
+		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		msg.SenderID = c.id
 		msg.Role = c.role
 
@@ -613,6 +615,12 @@ func (s *WSServer) checkRoomTimeouts() {
 	// Find all timed out rooms
 	var expiredRooms []*WSRoom
 	for _, room := range s.rooms {
+		room.mu.Lock()
+		isBusy := room.isRendering
+		room.mu.Unlock()
+		if isBusy {
+			continue // Skip checking timeout if the room is busy rendering/compiling
+		}
 		if now.Sub(room.createdAt) >= timeoutDuration {
 			expiredRooms = append(expiredRooms, room)
 		}
@@ -831,4 +839,27 @@ func (a *App) RestartRoomTimer(roomCode string) string {
 		return "Success"
 	}
 	return "Room not found"
+}
+
+// SetRoomRenderingState toggles a room's active rendering/busy state and resets its timer once finished.
+func SetRoomRenderingState(roomID string, isRendering bool) {
+	embeddedServerMu.Lock()
+	srv := embeddedServer
+	embeddedServerMu.Unlock()
+
+	if srv == nil {
+		return
+	}
+
+	srv.mu.Lock()
+	room, ok := srv.rooms[roomID]
+	if ok {
+		room.mu.Lock()
+		room.isRendering = isRendering
+		if !isRendering {
+			room.createdAt = time.Now() // Reset session limit when rendering is completed
+		}
+		room.mu.Unlock()
+	}
+	srv.mu.Unlock()
 }
