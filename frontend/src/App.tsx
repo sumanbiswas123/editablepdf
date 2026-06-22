@@ -1151,7 +1151,6 @@ export const App: React.FC = () => {
       }
 
       setCompilationProgress((prev) => ({
-        sidebar: true,
         phase: prev?.phase || 'crawling',
         current: prev?.current ?? 0,
         total: prev?.total ?? 100,
@@ -2823,7 +2822,6 @@ export const App: React.FC = () => {
         remoteFilenameRef.current = filename;
 
         setCompilationProgress({
-          sidebar: true,
           phase: 'merging',
           current: 95,
           total: 100,
@@ -2959,7 +2957,6 @@ export const App: React.FC = () => {
         remoteFilenameRef.current = filename;
 
         setCompilationProgress({
-          sidebar: true,
           phase: 'merging',
           current: 95,
           total: 100,
@@ -3063,7 +3060,6 @@ export const App: React.FC = () => {
 
         // End session and merge
         setCompilationProgress({
-          sidebar: true,
           phase: 'merging',
           current: jobs.length + 1,
           total: jobs.length + 1,
