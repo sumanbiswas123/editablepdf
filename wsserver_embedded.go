@@ -403,7 +403,7 @@ func (c *WSClient) readPump() {
 					ownerClient.send <- msg
 				}
 			}
-		case "pdf", "proxy_request", "proxy_response", "sync_workspace":
+		case "pdf", "proxy_request", "proxy_response", "sync_workspace", "start_render_session", "start_render_session_ack", "render_page", "render_page_ack", "end_render_session":
 			if msg.Target != "" && c.srv != nil {
 				c.srv.mu.Lock()
 				targetClient := c.srv.clients[msg.Target]
