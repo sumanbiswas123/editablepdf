@@ -2480,7 +2480,7 @@ export const App: React.FC = () => {
           slideName: activeSlide.name,
           folderName: activeSlide.folderName,
           url: renderUrl,
-          customHtml: '', // empty so Mac Performer handles it as direct URL
+          customHtml: capturedHtml,
           tempFilename: ''
         };
 
