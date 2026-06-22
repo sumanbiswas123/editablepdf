@@ -393,7 +393,7 @@ func (c *WSClient) readPump() {
 				b, _ := json.Marshal(list)
 				c.send <- WSMessage{Type: "devices_list", Data: string(b)}
 			}
-		case "render_request":
+		case "render_request", "start_render_session", "render_page", "end_render_session":
 			if c.room != nil && c.room.owner != "" && c.srv != nil {
 				c.srv.mu.Lock()
 				ownerClient := c.srv.clients[c.room.owner]
@@ -403,7 +403,7 @@ func (c *WSClient) readPump() {
 					ownerClient.send <- msg
 				}
 			}
-		case "pdf", "proxy_request", "proxy_response", "sync_workspace", "start_render_session", "start_render_session_ack", "render_page", "render_page_ack", "end_render_session":
+		case "pdf", "proxy_request", "proxy_response", "sync_workspace", "start_render_session_ack", "render_page_ack":
 			if msg.Target != "" && c.srv != nil {
 				c.srv.mu.Lock()
 				targetClient := c.srv.clients[msg.Target]
