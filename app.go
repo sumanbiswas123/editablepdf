@@ -346,23 +346,6 @@ func (a *App) wsReadLoopForRoom(wsc *WSConnection, mode string) {
 			if ok && requester != "" {
 				go a.handleRenderRequestForRoom(wsc, jobsRaw, requester)
 			}
-		case "start_render_session":
-			requester, _ := msg["senderId"].(string)
-			if requester != "" {
-				go a.handleStartRenderSessionForRoom(wsc, requester)
-			}
-		case "render_page":
-			jobRaw, ok := msg["job"]
-			requester, _ := msg["senderId"].(string)
-			if ok && requester != "" {
-				go a.handleRenderPageForRoom(wsc, jobRaw, requester)
-			}
-		case "end_render_session":
-			filename, _ := msg["filename"].(string)
-			requester, _ := msg["senderId"].(string)
-			if requester != "" {
-				go a.handleEndRenderSessionForRoom(wsc, filename, requester)
-			}
 		case "sync_workspace":
 			dataStr, _ := msg["data"].(string)
 			go a.handleSyncWorkspace(dataStr)
@@ -540,105 +523,6 @@ func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{},
 	}
 	b, _ := os.ReadFile(outPath)
 	a.emitViewershipEvent(roomCode, fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
-	_ = a.sendWSForRoom(roomCode, map[string]interface{}{
-		"type":     "pdf",
-		"data":     base64.StdEncoding.EncodeToString(b),
-		"filename": filepath.Base(outPath),
-		"mimetype": "application/pdf",
-		"target":   requester,
-	})
-}
-
-func (a *App) handleStartRenderSessionForRoom(wsc *WSConnection, requester string) {
-	roomCode := wsc.roomCode
-	SetRoomRenderingState(roomCode, true)
-	a.emitViewershipEvent(roomCode, fmt.Sprintf("Starting collaborative render session for client %s", requester))
-	_, err := a.StartPDFSession()
-	if err != nil {
-		a.emitViewershipEvent(roomCode, fmt.Sprintf("Failed to start session: %s", err.Error()))
-		_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
-		SetRoomRenderingState(roomCode, false)
-		return
-	}
-	_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "start_render_session_ack", "target": requester})
-}
-
-func (a *App) handleRenderPageForRoom(wsc *WSConnection, jobRaw interface{}, requester string) {
-	roomCode := wsc.roomCode
-	m, ok := jobRaw.(map[string]interface{})
-	if !ok {
-		a.emitViewershipEvent(roomCode, "Failed to parse render page job")
-		_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "error", "message": "invalid job payload", "target": requester})
-		return
-	}
-	job := ExportJob{}
-	if v, ok := m["slideName"].(string); ok { job.SlideName = v }
-	if v, ok := m["folderName"].(string); ok { job.FolderName = v }
-	if v, ok := m["url"].(string); ok { job.URL = v }
-	if v, ok := m["customHtml"].(string); ok { job.CustomHTML = v }
-	if v, ok := m["isSwimlane"].(bool); ok { job.IsSwimlane = v }
-
-	a.emitViewershipEvent(roomCode, fmt.Sprintf("Rendering slide: %s", job.SlideName))
-
-	// Resolve localhost/127.0.0.1 proxies on Mac if workspace path is empty
-	renderUrl := job.URL
-	if a.currentDir != "" && a.serverPort != 0 {
-		if parsed, err := url.Parse(renderUrl); err == nil {
-			renderUrl = fmt.Sprintf("http://127.0.0.1:%d%s", a.serverPort, parsed.Path)
-		}
-	} else if a.currentDir == "" {
-		if parsed, err := url.Parse(renderUrl); err == nil {
-			if roomCode != "" {
-				renderUrl = fmt.Sprintf("http://127.0.0.1:8081/proxy/%s%s", roomCode, parsed.Path)
-			} else {
-				renderUrl = fmt.Sprintf("http://127.0.0.1:8081/proxy%s", parsed.Path)
-			}
-		}
-	}
-	job.URL = renderUrl
-
-	err := a.CompileSingleStateToPDF(job, 200)
-	if err != nil {
-		a.emitViewershipEvent(roomCode, fmt.Sprintf("Render page error: %s", err.Error()))
-		_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
-		return
-	}
-
-	currentCount := len(a.pdfPaths)
-	_ = a.sendWSForRoom(roomCode, map[string]interface{}{
-		"type":      "render_page_ack",
-		"slideName": job.SlideName,
-		"current":   currentCount,
-		"target":    requester,
-	})
-}
-
-func (a *App) handleEndRenderSessionForRoom(wsc *WSConnection, filename string, requester string) {
-	roomCode := wsc.roomCode
-	defer SetRoomRenderingState(roomCode, false)
-
-	a.emitViewershipEvent(roomCode, "Ending render session and stitching pages...")
-	
-	if filename == "" {
-		filename = "stitched_deck.pdf"
-	}
-	outputPath := filepath.Join(os.TempDir(), fmt.Sprintf("render_%d_%s", time.Now().Unix(), filename))
-
-	outPath, err := a.EndPDFSession(outputPath)
-	if err != nil {
-		a.emitViewershipEvent(roomCode, fmt.Sprintf("Failed to finalize PDF session: %s", err.Error()))
-		_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
-		return
-	}
-
-	b, err := os.ReadFile(outPath)
-	if err != nil {
-		a.emitViewershipEvent(roomCode, fmt.Sprintf("Failed to read merged PDF: %s", err.Error()))
-		_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "error", "message": err.Error(), "target": requester})
-		return
-	}
-
-	a.emitViewershipEvent(roomCode, fmt.Sprintf("Sending final PDF: %s (%d bytes)", filepath.Base(outPath), len(b)))
 	_ = a.sendWSForRoom(roomCode, map[string]interface{}{
 		"type":     "pdf",
 		"data":     base64.StdEncoding.EncodeToString(b),

@@ -196,16 +196,6 @@ func (a *App) CompileDeckFromCaptures(jobs []ExportJob, sleepMs int) (string, er
 
 // StartPDFSession initializes a new chromedp session for compiling states on-the-fly
 func (a *App) StartPDFSession() (string, error) {
-	if a.pdfCtx != nil {
-		if a.pdfCancel != nil {
-			a.pdfCancel()
-		}
-		if a.pdfAllocatorCancel != nil {
-			a.pdfAllocatorCancel()
-		}
-		a.pdfCtx = nil
-	}
-
 	tempDir, err := os.MkdirTemp("", "wails_pdf_compile_")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp directory: %w", err)

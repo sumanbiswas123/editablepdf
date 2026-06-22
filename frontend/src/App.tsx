@@ -1125,11 +1125,7 @@ export const App: React.FC = () => {
       };
 
       if (appMode === 'capture') {
-        controllerWS?.send(JSON.stringify({
-          type: 'render_page',
-          job: job
-        }));
-        await new Promise((r) => setTimeout(r, 150));
+        remoteJobsRef.current.push(job);
       } else {
         await CompileSingleStateToPDF(job, settleMs);
       }
@@ -1168,11 +1164,7 @@ export const App: React.FC = () => {
       };
 
       if (appMode === 'capture') {
-        controllerWS?.send(JSON.stringify({
-          type: 'render_page',
-          job: job
-        }));
-        await new Promise((r) => setTimeout(r, 150));
+        remoteJobsRef.current.push(job);
       } else {
         await CompileSingleStateToPDF(job, settleMs);
       }
@@ -2366,18 +2358,6 @@ export const App: React.FC = () => {
             const list = JSON.parse(msg.data);
             setConnectedClients(list || []);
           } catch (_) {}
-        } else if (msg.type === 'start_render_session_ack') {
-          console.log("WS Windows: Mac started active rendering session.");
-        } else if (msg.type === 'render_page_ack') {
-          setCompilationProgress((prev) => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              phase: 'rendering',
-              current: msg.current,
-              detail: `Mac rendered page: ${msg.slideName || 'slide'} (${msg.current} completed)`
-            };
-          });
         } else if (msg.type === 'proxy_request') {
           try {
             const res = await ReadLocalFile(msg.filename);
@@ -2480,7 +2460,7 @@ export const App: React.FC = () => {
           slideName: activeSlide.name,
           folderName: activeSlide.folderName,
           url: renderUrl,
-          customHtml: capturedHtml,
+          customHtml: '', // empty so Mac Performer handles it as direct URL
           tempFilename: ''
         };
 
@@ -2488,11 +2468,10 @@ export const App: React.FC = () => {
         const filename = nextPath.substring(Math.max(nextPath.lastIndexOf('/'), nextPath.lastIndexOf('\\')) + 1);
         remoteFilenameRef.current = filename;
 
-        controllerWS?.send(JSON.stringify({ type: 'start_render_session' }));
-        await new Promise((r) => setTimeout(r, 150));
-        controllerWS?.send(JSON.stringify({ type: 'render_page', job }));
-        await new Promise((r) => setTimeout(r, 150));
-        controllerWS?.send(JSON.stringify({ type: 'end_render_session', filename }));
+        controllerWS?.send(JSON.stringify({
+          type: 'render_request',
+          jobs: [job]
+        }));
       } catch (err: any) {
         console.error('Save Slide failed:', err);
         alert(`Save Slide failed: ${err.message || err}`);
@@ -2577,10 +2556,7 @@ export const App: React.FC = () => {
 
       remoteJobsRef.current = [];
       pendingCleanupsRef.current = [];
-      if (appMode === 'capture') {
-        controllerWS?.send(JSON.stringify({ type: 'start_render_session' }));
-        await new Promise((r) => setTimeout(r, 150));
-      } else {
+      if (appMode !== 'capture') {
         await StartPDFSession();
       }
 
@@ -2602,25 +2578,44 @@ export const App: React.FC = () => {
               current: 90,
               total: 100,
               slide: activeSlide.name,
-              detail: appMode === 'capture' ? 'Stitching pages on Mac Performer...' : 'Saving output PDF file...'
+              detail: appMode === 'capture' ? 'Requesting Safari rendering on Mac...' : 'Saving output PDF file...'
             });
 
             if (appMode === 'capture') {
               const nextPath = await GenerateNextAutoSlidePDFPath(currentSlideIndex);
               const filename = nextPath.substring(Math.max(nextPath.lastIndexOf('/'), nextPath.lastIndexOf('\\')) + 1);
               remoteFilenameRef.current = filename;
+              
+              setCompilationProgress({
+                phase: 'rendering',
+                current: 1,
+                total: remoteJobsRef.current.length,
+                slide: activeSlide.name,
+                detail: 'Preparing slide state resources for Mac Performer...'
+              });
+
+              const resolvedJobs = [];
+              for (let i = 0; i < remoteJobsRef.current.length; i++) {
+                const j = remoteJobsRef.current[i];
+                resolvedJobs.push({
+                  ...j,
+                  url: j.url,
+                  customHtml: j.customHtml,
+                  tempFilename: ''
+                });
+              }
 
               setCompilationProgress({
-                phase: 'merging',
-                current: 95,
-                total: 100,
+                phase: 'rendering',
+                current: 1,
+                total: resolvedJobs.length,
                 slide: activeSlide.name,
-                detail: 'Stitching pages on Mac Performer...'
+                detail: 'Requesting Safari rendering on Mac...'
               });
 
               controllerWS?.send(JSON.stringify({
-                type: 'end_render_session',
-                filename: filename
+                type: 'render_request',
+                jobs: resolvedJobs
               }));
               remoteJobsRef.current = [];
             } else {
@@ -2703,11 +2698,6 @@ export const App: React.FC = () => {
       };
       remoteJobsRef.current = [];
       pendingCleanupsRef.current = [];
-
-      if (appMode === 'capture') {
-        controllerWS?.send(JSON.stringify({ type: 'start_render_session' }));
-        await new Promise((r) => setTimeout(r, 150));
-      }
       
       setCompilationProgress({
         phase: 'crawling',
@@ -2817,21 +2807,39 @@ export const App: React.FC = () => {
       }
 
       if (appMode === 'capture') {
-        const presentationId = rootDirectory.split(/[/\\]/).filter(Boolean).pop() || 'deck';
-        const filename = `${presentationId}_deck.pdf`;
-        remoteFilenameRef.current = filename;
+        setCompilationProgress({
+          phase: 'merging',
+          current: 95,
+          total: 100,
+          slide: 'Preparing slide batch...',
+          detail: 'Mapping state resources to LAN IP...'
+        });
+
+        const resolvedJobs = [];
+        for (let i = 0; i < remoteJobsRef.current.length; i++) {
+          const j = remoteJobsRef.current[i];
+          resolvedJobs.push({
+            ...j,
+            url: j.url,
+            customHtml: j.customHtml,
+            tempFilename: ''
+          });
+        }
 
         setCompilationProgress({
           phase: 'merging',
           current: 95,
           total: 100,
-          slide: 'Finalizing ePDF',
-          detail: 'Stitching pages on Mac Performer...'
+          slide: 'Sending batch to Mac Performer...',
+          detail: 'Requesting Safari rendering on Mac...'
         });
 
+        const presentationId = rootDirectory.split(/[/\\]/).filter(Boolean).pop() || 'deck';
+        remoteFilenameRef.current = `${presentationId}_deck.pdf`;
+
         controllerWS?.send(JSON.stringify({
-          type: 'end_render_session',
-          filename: filename
+          type: 'render_request',
+          jobs: resolvedJobs
         }));
         remoteJobsRef.current = [];
       } else {
@@ -2895,14 +2903,7 @@ export const App: React.FC = () => {
       };
       remoteJobsRef.current = [];
       pendingCleanupsRef.current = [];
-
-      if (appMode === 'capture') {
-        controllerWS?.send(JSON.stringify({ type: 'start_render_session' }));
-        await new Promise((r) => setTimeout(r, 150));
-      } else {
-        await StartPDFSession();
-      }
-
+      
       setCompilationProgress({
         phase: 'crawling',
         current: 0,
@@ -2913,7 +2914,12 @@ export const App: React.FC = () => {
 
       setCurrentSlideIndex(0);
       await new Promise((r) => setTimeout(r, sleepMs + 400));
+
       const slide = slides[0];
+
+      if (appMode !== 'capture') {
+        await StartPDFSession();
+      }
 
       // 1. Open bottom navigation (Slides) and capture
       updateProgress("🔄 Opening bottom navigation section...");
@@ -2952,21 +2958,39 @@ export const App: React.FC = () => {
       }
 
       if (appMode === 'capture') {
-        const presentationId = rootDirectory.split(/[/\\]/).filter(Boolean).pop() || 'deck';
-        const filename = `${presentationId}_swimlane_overlays.pdf`;
-        remoteFilenameRef.current = filename;
+        setCompilationProgress({
+          phase: 'merging',
+          current: 95,
+          total: 100,
+          slide: 'Preparing overlays batch...',
+          detail: 'Mapping state resources to LAN IP...'
+        });
+
+        const resolvedJobs = [];
+        for (let i = 0; i < remoteJobsRef.current.length; i++) {
+          const j = remoteJobsRef.current[i];
+          resolvedJobs.push({
+            ...j,
+            url: j.url,
+            customHtml: j.customHtml,
+            tempFilename: ''
+          });
+        }
 
         setCompilationProgress({
           phase: 'merging',
           current: 95,
           total: 100,
-          slide: 'Finalizing ePDF',
-          detail: 'Stitching pages on Mac Performer...'
+          slide: 'Sending batch to Mac Performer...',
+          detail: 'Requesting Safari rendering on Mac...'
         });
 
+        const presentationId = rootDirectory.split(/[/\\]/).filter(Boolean).pop() || 'deck';
+        remoteFilenameRef.current = `${presentationId}_swimlane_overlays.pdf`;
+
         controllerWS?.send(JSON.stringify({
-          type: 'end_render_session',
-          filename: filename
+          type: 'render_request',
+          jobs: resolvedJobs
         }));
         remoteJobsRef.current = [];
       } else {
@@ -3036,40 +3060,9 @@ export const App: React.FC = () => {
         const filename = nextPath.substring(Math.max(nextPath.lastIndexOf('/'), nextPath.lastIndexOf('\\')) + 1);
         remoteFilenameRef.current = filename;
 
-        // Start render session
-        controllerWS?.send(JSON.stringify({ type: 'start_render_session' }));
-        await new Promise((r) => setTimeout(r, 150));
-
-        // Stream pages one-by-one
-        for (let i = 0; i < jobs.length; i++) {
-          setCompilationProgress({
-            phase: 'rendering',
-            current: i + 1,
-            total: jobs.length + 1,
-            slide: jobs[i].slideName,
-            detail: `Sending page ${i + 1}/${jobs.length} to Mac Performer...`
-          });
-
-          controllerWS?.send(JSON.stringify({
-            type: 'render_page',
-            job: jobs[i]
-          }));
-
-          await new Promise((r) => setTimeout(r, 150));
-        }
-
-        // End session and merge
-        setCompilationProgress({
-          phase: 'merging',
-          current: jobs.length + 1,
-          total: jobs.length + 1,
-          slide: 'Finalizing ePDF',
-          detail: 'Stitching pages on Mac Performer...'
-        });
-
         controllerWS?.send(JSON.stringify({
-          type: 'end_render_session',
-          filename: filename
+          type: 'render_request',
+          jobs: jobs
         }));
       } catch (err: any) {
         console.error('Deck compilation failed:', err);
