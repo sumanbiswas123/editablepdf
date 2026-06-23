@@ -1017,6 +1017,48 @@ func (a *App) DeleteCompiledPDF(filename string) error {
 	return os.Remove(fullPath)
 }
 
+// ClearSingleSlidePDFs deletes all single slide compiled PDFs from the output directory
+func (a *App) ClearSingleSlidePDFs() error {
+	outDir := a.GetOutputDir()
+	if outDir == "" {
+		return fmt.Errorf("no output directory")
+	}
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".pdf" {
+			continue
+		}
+		if a.IsSingleSlidePDF(entry.Name()) {
+			_ = os.Remove(filepath.Join(outDir, entry.Name()))
+		}
+	}
+	return nil
+}
+
+// MergePDFsToPath merges a list of PDF files directly to the specified output path
+func (a *App) MergePDFsToPath(filenames []string, outputPath string) error {
+	outDir, err := a.EnsureOutputDir()
+	if err != nil {
+		return err
+	}
+	var fullPaths []string
+	for _, f := range filenames {
+		if filepath.IsAbs(f) {
+			fullPaths = append(fullPaths, f)
+		} else {
+			fullPaths = append(fullPaths, filepath.Join(outDir, filepath.Base(f)))
+		}
+	}
+	finalPath := outputPath
+	if !filepath.IsAbs(outputPath) {
+		finalPath = filepath.Join(outDir, filepath.Base(outputPath))
+	}
+	return api.MergeCreateFile(fullPaths, finalPath, false, nil)
+}
+
 // RenameCombinedPDF renames a compiled PDF inside the output directory
 func (a *App) RenameCombinedPDF(oldFilename string, newFilename string) error {
 	outDir := a.GetOutputDir()

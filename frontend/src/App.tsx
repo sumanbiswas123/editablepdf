@@ -24,6 +24,8 @@ import {
   GenerateNextSequentialPDFPath,
   GenerateNextAutoSlidePDFPath,
   CombineCustomPDFs,
+  ClearSingleSlidePDFs,
+  MergePDFsToPath,
   SelectPDFFile,
   SplitCombinedPDFToPages,
   RebuildCombinedPDF,
@@ -2590,6 +2592,7 @@ export const App: React.FC = () => {
       receivedRemotePDFsCountRef.current = 0;
       receivedPDFsThisSessionRef.current = [];
       pendingCleanupsRef.current = [];
+      await ClearSingleSlidePDFs();
       if (appMode !== 'capture') {
         await StartPDFSession();
       }
@@ -2733,6 +2736,7 @@ export const App: React.FC = () => {
       remoteJobSeqRef.current = 0;
       receivedRemotePDFsCountRef.current = 0;
       pendingCleanupsRef.current = [];
+      await ClearSingleSlidePDFs();
       
       setCompilationProgress({
         phase: 'crawling',
@@ -2940,6 +2944,7 @@ export const App: React.FC = () => {
       remoteJobSeqRef.current = 0;
       receivedRemotePDFsCountRef.current = 0;
       pendingCleanupsRef.current = [];
+      await ClearSingleSlidePDFs();
       
       setCompilationProgress({
         phase: 'crawling',
