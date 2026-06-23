@@ -320,10 +320,10 @@ func (c *WSClient) readPump() {
 		c.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(50 << 20) // 50MiB
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	c.conn.SetReadLimit(1024 << 20) // 1GiB
+	c.conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		c.conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 		return nil
 	})
 
@@ -332,7 +332,7 @@ func (c *WSClient) readPump() {
 		if err := c.conn.ReadJSON(&msg); err != nil {
 			break
 		}
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		c.conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 		msg.SenderID = c.id
 		msg.Role = c.role
 

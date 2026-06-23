@@ -266,7 +266,7 @@ func (a *App) StartWSClient(serverURL, room, mode string) error {
 	if err != nil {
 		return err
 	}
-	conn.SetReadLimit(50 << 20) // Set read limit to 50MiB to handle large deck payloads
+	conn.SetReadLimit(1024 << 20) // Set read limit to 1GiB to handle large deck payloads
 
 	wsc := &WSConnection{
 		conn:     conn,
@@ -490,7 +490,13 @@ func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{},
 				}
 				b, _ := os.ReadFile(outPath)
 				a.emitViewershipEvent(roomCode, fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
-				_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": filepath.Base(outPath), "mimetype": "application/pdf", "target": requester})
+				
+				targetFilename := filepath.Base(outPath)
+				if len(jobs) == 1 && jobs[0].TempFilename != "" {
+					targetFilename = jobs[0].TempFilename
+				}
+				
+				_ = a.sendWSForRoom(roomCode, map[string]interface{}{"type": "pdf", "data": base64.StdEncoding.EncodeToString(b), "filename": targetFilename, "mimetype": "application/pdf", "target": requester})
 				return
 			}
 		}
@@ -507,6 +513,7 @@ func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{},
 			if v, ok := m["folderName"].(string); ok { job.FolderName = v }
 			if v, ok := m["url"].(string); ok { job.URL = v }
 			if v, ok := m["customHtml"].(string); ok { job.CustomHTML = v }
+			if v, ok := m["tempFilename"].(string); ok { job.TempFilename = v }
 			if v, ok := m["isSwimlane"].(bool); ok { job.IsSwimlane = v }
 			jobs = append(jobs, job)
 		}
@@ -523,10 +530,16 @@ func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{},
 	}
 	b, _ := os.ReadFile(outPath)
 	a.emitViewershipEvent(roomCode, fmt.Sprintf("Finished rendering! Sending PDF %s (%d bytes)", filepath.Base(outPath), len(b)))
+	
+	targetFilename := filepath.Base(outPath)
+	if len(jobs) == 1 && jobs[0].TempFilename != "" {
+		targetFilename = jobs[0].TempFilename
+	}
+	
 	_ = a.sendWSForRoom(roomCode, map[string]interface{}{
 		"type":     "pdf",
 		"data":     base64.StdEncoding.EncodeToString(b),
-		"filename": filepath.Base(outPath),
+		"filename": targetFilename,
 		"mimetype": "application/pdf",
 		"target":   requester,
 	})
