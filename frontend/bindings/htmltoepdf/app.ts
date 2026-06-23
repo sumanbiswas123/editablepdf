@@ -388,6 +388,20 @@ export function GetSystemUsername(): $CancellablePromise<string> {
     return $Call.ByName("main.App.GetSystemUsername");
 }
 
+/**
+ * ClearSingleSlidePDFs deletes all single slide compiled PDFs from the output directory
+ */
+export function ClearSingleSlidePDFs(): $CancellablePromise<void> {
+    return $Call.ByName("main.App.ClearSingleSlidePDFs");
+}
+
+/**
+ * MergePDFsToPath merges a list of PDF files directly to the specified output path
+ */
+export function MergePDFsToPath(filenames: string[], outputPath: string): $CancellablePromise<void> {
+    return $Call.ByName("main.App.MergePDFsToPath", filenames, outputPath);
+}
+
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
 const $$createType1 = $models.CompiledPDF.createFrom;
@@ -395,3 +409,4 @@ const $$createType2 = $Create.Array($$createType1);
 const $$createType3 = $Create.Map($Create.Any, $Create.Any);
 const $$createType4 = $models.ScanResult.createFrom;
 const $$createType5 = $Create.Nullable($$createType4);
+
