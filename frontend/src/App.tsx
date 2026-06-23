@@ -183,6 +183,7 @@ export const App: React.FC = () => {
   const remoteJobSeqRef = useRef<number>(0);
   const receivedRemotePDFsCountRef = useRef<number>(0);
   const receivedPDFsThisSessionRef = useRef<string[]>([]);
+  const cleanupMapRef = useRef<Record<string, { folder: string; file: string }>>({});
 
   // Fetch Windows Controller IP for routing (with subnet prefix matching to target Mac IP)
   useEffect(() => {
@@ -1130,7 +1131,14 @@ export const App: React.FC = () => {
       if (appMode === 'capture') {
         remoteJobSeqRef.current += 1;
         const pad = String(remoteJobSeqRef.current).padStart(5, '0');
-        job.tempFilename = `slide_${pad}.pdf`;
+        const pdfFilename = `slide_${pad}.pdf`;
+        job.tempFilename = pdfFilename;
+
+        const tempFilename = renderUrl.substring(renderUrl.lastIndexOf('/') + 1);
+        if (tempFilename.startsWith('temp_state_')) {
+          cleanupMapRef.current[pdfFilename] = { folder: slide.folderName, file: tempFilename };
+        }
+
         controllerWS?.send(JSON.stringify({
           type: 'render_request',
           jobs: [job]
@@ -1175,7 +1183,14 @@ export const App: React.FC = () => {
       if (appMode === 'capture') {
         remoteJobSeqRef.current += 1;
         const pad = String(remoteJobSeqRef.current).padStart(5, '0');
-        job.tempFilename = `slide_${pad}.pdf`;
+        const pdfFilename = `slide_${pad}.pdf`;
+        job.tempFilename = pdfFilename;
+
+        const tempFilename = renderUrl.substring(renderUrl.lastIndexOf('/') + 1);
+        if (tempFilename.startsWith('temp_state_')) {
+          cleanupMapRef.current[pdfFilename] = { folder: slide.folderName, file: tempFilename };
+        }
+
         controllerWS?.send(JSON.stringify({
           type: 'render_request',
           jobs: [job]
@@ -2323,15 +2338,12 @@ export const App: React.FC = () => {
           const filename = remoteFilenameRef.current || msg.filename;
           await SaveRemotePDF(filename, msg.data);
 
-          if (pendingCleanupsRef.current.length > 0) {
-            for (const cleanup of pendingCleanupsRef.current) {
-              try {
-                if (cleanup.file.startsWith('temp_state_')) {
-                  await CleanUpTempHTML(cleanup.folder, cleanup.file);
-                }
-              } catch (_) {}
-            }
-            pendingCleanupsRef.current = [];
+          const cleanup = cleanupMapRef.current[filename];
+          if (cleanup) {
+            try {
+              await CleanUpTempHTML(cleanup.folder, cleanup.file);
+            } catch (_) {}
+            delete cleanupMapRef.current[filename];
           }
           
           if (isSingleSave) {
