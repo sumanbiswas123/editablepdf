@@ -1093,6 +1093,11 @@ func (a *App) CaptureCustomStateHTML(folderName string, htmlContent string) (str
 	filename := fmt.Sprintf("temp_state_%d.html", time.Now().UnixNano())
 	fullPath := filepath.Join(a.currentDir, folderName, filename)
 
+	// Ensure the parent directory exists in case of directory mismatch or synced workspace structure
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return "", fmt.Errorf("failed to create directory for temporary state: %w", err)
+	}
+
 	err := os.WriteFile(fullPath, []byte(frozenHTML), 0644)
 	if err != nil {
 		return "", fmt.Errorf("failed to save temporary state HTML: %w", err)
