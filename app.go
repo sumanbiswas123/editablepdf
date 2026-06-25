@@ -238,9 +238,14 @@ func (a *App) ServiceName() string {
 func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	a.ctx = ctx
 	a.app = application.Get()
+	
+	// Start the embedded server immediately
+	a.StartEmbeddedWSServer()
+	
 	go func() {
 		<-ctx.Done()
 		a.CleanUpServer()
+		a.CleanUpEmbeddedWSServer()
 	}()
 	return nil
 }

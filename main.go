@@ -1,19 +1,20 @@
 package main
-
+ 
 import (
 	"embed"
 	"log"
-
+	"os"
+ 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
-
+ 
 //go:embed all:frontend/dist
 var assets embed.FS
-
+ 
 func main() {
 	// Create an instance of the app structure
 	appService := NewApp()
-
+ 
 	app := application.New(application.Options{
 		Name: "htmltoepdf",
 		Assets: application.AssetOptions{
@@ -27,14 +28,24 @@ func main() {
 		},
 	})
 
+	// Check if --server flag is passed
+	hasServerFlag := false
+	for _, arg := range os.Args {
+		if arg == "--server" {
+			hasServerFlag = true
+			break
+		}
+	}
+ 
 	// Create window
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:  "htmltoepdf",
 		Width:  1024,
 		Height: 768,
 		BackgroundColour: application.RGBA{Red: 27, Green: 38, Blue: 54, Alpha: 255},
+		Hidden: hasServerFlag,
 	})
-
+ 
 	// Run the application
 	err := app.Run()
 	if err != nil {
