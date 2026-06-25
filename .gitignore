@@ -7,3 +7,5 @@ htmltoepdf
 htmltoepdf.exe
 htmltoepdf.exe~
 bin/
+prod_htmltoepdf.exe
+prod_htmltoepdf.exe~
