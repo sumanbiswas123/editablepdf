@@ -572,6 +572,7 @@ export const Canvas: React.FC<CanvasProps> = ({
            Capture Swimlane
          </button>
        )}
+      </div>
 
       {/* Sized-constrained container to match visual scaled dimensions */}
       <div
