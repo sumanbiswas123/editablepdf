@@ -451,7 +451,12 @@ export const App: React.FC = () => {
 
   // Compilation Progress State
   const [compilationProgress, setCompilationProgress] = useState<CompilationProgress | null>(null);
-  const [isSingleSave, setIsSingleSave] = useState(false);
+  const [isSingleSave, _setIsSingleSave] = useState(false);
+  const isSingleSaveRef = useRef(false);
+  const setIsSingleSave = (val: boolean) => {
+    isSingleSaveRef.current = val;
+    _setIsSingleSave(val);
+  };
   const [studioOpen, setStudioOpen] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -2348,7 +2353,7 @@ export const App: React.FC = () => {
             delete cleanupMapRef.current[filename];
           }
           
-          if (isSingleSave) {
+          if (isSingleSaveRef.current) {
             setCompilationProgress({
               phase: 'complete',
               current: 100,
