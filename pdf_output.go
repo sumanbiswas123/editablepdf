@@ -2967,10 +2967,16 @@ func (a *App) CombineCustomPDFs(filenames []string, combinedMetadataJSON string)
 
 // SelectPDFFile opens a system dialog to choose a PDF file and returns its path
 func (a *App) SelectPDFFile() (string, error) {
-	filePath, err := a.app.Dialog.OpenFile().
+	dialog := a.app.Dialog.OpenFile().
 		SetTitle("Select PDF File to Import").
-		AddFilter("PDF Files (*.pdf)", "*.pdf").
-		PromptForSingleSelection()
+		AddFilter("PDF Files (*.pdf)", "*.pdf")
+	
+	win := a.app.Window.Current()
+	if win != nil {
+		dialog.AttachToWindow(win)
+	}
+	
+	filePath, err := dialog.PromptForSingleSelection()
 	if err != nil {
 		return "", err
 	}

@@ -60,6 +60,16 @@ const safeEventsOn = (eventName: string, callback: (data: any) => void): (() => 
   return () => {};
 };
 
+const fetchCombineCompiledPDFs = async (): Promise<string> => {
+  const res = await fetch('http://127.0.0.1:8081/combine', { method: 'POST' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'Stitching failed');
+  }
+  const data = await res.json();
+  return data.path;
+};
+
 
 interface Slide {
   name: string;
@@ -99,9 +109,16 @@ export const App: React.FC = () => {
     if (params.get('mode') === 'builder') {
       return 'builder';
     }
-    return 'capture';
+    const isMac = /Mac|iPad|iPhone|iPod/.test(navigator.userAgent || '');
+    if (isMac) {
+      return 'capture';
+    }
+    return 'select';
   });
-  const [osPlatform, setOsPlatform] = useState<'darwin' | 'windows' | ''>('');
+  const [osPlatform, setOsPlatform] = useState<'darwin' | 'windows' | ''>(() => {
+    const isMac = /Mac|iPad|iPhone|iPod/.test(navigator.userAgent || '');
+    return isMac ? 'darwin' : 'windows';
+  });
   
   // Mac Performer details
   const [macPairingCode, setMacPairingCode] = useState('');
@@ -778,7 +795,7 @@ export const App: React.FC = () => {
         detail: 'Executing PDF stitcher engine...'
       });
 
-      await CombineCompiledPDFs();
+      await fetchCombineCompiledPDFs();
 
       setCompilationProgress({
         phase: 'complete',
@@ -2873,7 +2890,7 @@ export const App: React.FC = () => {
           detail: 'Combining compiled PDF slices...'
         });
 
-        await CombineCompiledPDFs();
+        await fetchCombineCompiledPDFs();
 
         setCompilationProgress({
           phase: 'complete',
@@ -2895,7 +2912,7 @@ export const App: React.FC = () => {
           detail: 'Combining compiled PDF slices...'
         });
 
-        await CombineCompiledPDFs();
+        await fetchCombineCompiledPDFs();
 
         setCompilationProgress({
           phase: 'complete',
@@ -3027,7 +3044,7 @@ export const App: React.FC = () => {
           detail: 'Combining compiled PDF slices...'
         });
 
-        await CombineCompiledPDFs();
+        await fetchCombineCompiledPDFs();
 
         setCompilationProgress({
           phase: 'complete',
@@ -3049,7 +3066,7 @@ export const App: React.FC = () => {
           detail: 'Combining compiled PDF slices...'
         });
 
-        await CombineCompiledPDFs();
+        await fetchCombineCompiledPDFs();
 
         setCompilationProgress({
           phase: 'complete',

@@ -547,11 +547,17 @@ func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{},
 
 // SelectDirectory triggers the folder selector dialog
 func (a *App) SelectDirectory() (string, error) {
-	dir, err := a.app.Dialog.OpenFile().
+	dialog := a.app.Dialog.OpenFile().
 		SetTitle("Select eDA Presentation Root Directory").
 		CanChooseDirectories(true).
-		CanChooseFiles(false).
-		PromptForSingleSelection()
+		CanChooseFiles(false)
+	
+	win := a.app.Window.Current()
+	if win != nil {
+		dialog.AttachToWindow(win)
+	}
+	
+	dir, err := dialog.PromptForSingleSelection()
 	if err != nil {
 		return "", err
 	}
@@ -1109,11 +1115,16 @@ func (a *App) CaptureCustomStateHTML(folderName string, htmlContent string) (str
 
 // SelectScreenshotSavePath triggers a native save file dialog for screenshots
 func (a *App) SelectScreenshotSavePath(defaultFilename string) (string, error) {
-	return a.app.Dialog.SaveFile().
+	dialog := a.app.Dialog.SaveFile().
 		SetMessage("Save Slide Screenshot").
 		SetFilename(defaultFilename).
-		AddFilter("PNG Image (*.png)", "*.png").
-		PromptForSingleSelection()
+		AddFilter("PNG Image (*.png)", "*.png")
+	
+	win := a.app.Window.Current()
+	if win != nil {
+		dialog.AttachToWindow(win)
+	}
+	return dialog.PromptForSingleSelection()
 }
 
 // CompileScreenshot exports a single slide visual screenshot to a PNG file
@@ -1933,20 +1944,30 @@ func decodeJSON(r io.Reader, v interface{}) error {
 
 // SelectIDMLSavePath triggers a native save file dialog for IDMLs
 func (a *App) SelectIDMLSavePath(defaultFilename string) (string, error) {
-	return a.app.Dialog.SaveFile().
+	dialog := a.app.Dialog.SaveFile().
 		SetMessage("Save InDesign Interchange Package").
 		SetFilename(defaultFilename).
-		AddFilter("InDesign Markup Language (*.idml)", "*.idml").
-		PromptForSingleSelection()
+		AddFilter("InDesign Markup Language (*.idml)", "*.idml")
+	
+	win := a.app.Window.Current()
+	if win != nil {
+		dialog.AttachToWindow(win)
+	}
+	return dialog.PromptForSingleSelection()
 }
 
 // SelectSavePath triggers a native save file dialog
 func (a *App) SelectSavePath(defaultFilename string) (string, error) {
-	return a.app.Dialog.SaveFile().
+	dialog := a.app.Dialog.SaveFile().
 		SetMessage("Save Editable PDF").
 		SetFilename(defaultFilename).
-		AddFilter("PDF Files (*.pdf)", "*.pdf").
-		PromptForSingleSelection()
+		AddFilter("PDF Files (*.pdf)", "*.pdf")
+	
+	win := a.app.Window.Current()
+	if win != nil {
+		dialog.AttachToWindow(win)
+	}
+	return dialog.PromptForSingleSelection()
 }
 
 // CleanUpServer shuts down the local server when app closes

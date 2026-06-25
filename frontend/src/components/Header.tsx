@@ -291,10 +291,10 @@ export const Header: React.FC<HeaderProps> = ({
           transition: 'all var(--transition)'
         }}
         className="action-btn"
-        title="Open NoCodeX ePDF Studio"
+        title="Open PDF Studio"
       >
         <Sparkles size={11} />
-        Studio
+        PDF Studio
       </button>
 
       {/* Theme Toggle Button */}
