@@ -12,6 +12,10 @@ import (
 var assets embed.FS
  
 func main() {
+	// Register embedded frontend assets so the HTTP server on :8082 can serve the UI
+	// (used when the app is loaded as an iframe inside Nocodex)
+	SetAppAssets(assets)
+
 	// Create an instance of the app structure
 	appService := NewApp()
  
@@ -28,7 +32,7 @@ func main() {
 		},
 	})
 
-	// Check if --server flag is passed
+	// Check if --server flag is passed (launched by Nocodex as a background extension)
 	hasServerFlag := false
 	for _, arg := range os.Args {
 		if arg == "--server" {
@@ -36,8 +40,16 @@ func main() {
 			break
 		}
 	}
+
+	// When launched by Nocodex with --server, start the embedded HTTP server immediately.
+	// In normal Wails mode, the frontend JS calls StartEmbeddedWSServer() via Wails binding.
+	// In --server mode the Wails webview is hidden, so we must start it here from Go directly.
+	if hasServerFlag {
+		result := appService.StartEmbeddedWSServer()
+		log.Println("Embedded server started from main (--server mode):", result)
+	}
  
-	// Create window
+	// Create window (hidden in --server mode so the app runs silently as a background service)
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:  "htmltoepdf",
 		Width:  1024,

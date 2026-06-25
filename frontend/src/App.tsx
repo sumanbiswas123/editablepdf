@@ -61,7 +61,7 @@ const safeEventsOn = (eventName: string, callback: (data: any) => void): (() => 
 };
 
 const fetchCombineCompiledPDFs = async (): Promise<string> => {
-  const res = await fetch('http://127.0.0.1:8081/combine', { method: 'POST' });
+  const res = await fetch('http://127.0.0.1:8082/combine', { method: 'POST' });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || 'Stitching failed');
@@ -94,6 +94,10 @@ interface CompilationProgress {
 
 let globalDeviceRooms: any[] = [];
 let initialRoomPromise: Promise<any> | null = null;
+
+// True when the app is loaded inside Nocodex's iframe (?mode=embed).
+// In this mode Wails runtime is NOT available, so all window.go.* calls must be skipped.
+const isEmbedMode = new URLSearchParams(window.location.search).get('mode') === 'embed';
 
 export const App: React.FC = () => {
   // Theme state
@@ -203,9 +207,10 @@ export const App: React.FC = () => {
   // Fetch Windows Controller IP for routing (with subnet prefix matching to target Mac IP)
   useEffect(() => {
     const fetchWindowsIP = async () => {
+      if (isEmbedMode) return; // Wails API unavailable in iframe mode
       try {
         const ips = await GetLocalIPAddresses();
-        if (ips && ips.length > 0) {
+        if (ips && Array.isArray(ips) && ips.length > 0) {
           let matched = ips[0];
           if (targetMacIP) {
             const macPrefix = targetMacIP.split('.').slice(0, 3).join('.'); // e.g., "192.168.1"
@@ -228,6 +233,11 @@ export const App: React.FC = () => {
   // Detect OS platform
   useEffect(() => {
     const detect = async () => {
+      if (isEmbedMode) {
+        // In embed/iframe mode Wails is unavailable — always Windows (Nocodex runs on Windows)
+        setOsPlatform('windows');
+        return;
+      }
       try {
         const plat = await GetPlatform();
         setOsPlatform(plat.toLowerCase() as 'darwin' | 'windows');
@@ -246,7 +256,7 @@ export const App: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch('http://127.0.0.1:8081/create-room');
+      const res = await fetch('http://127.0.0.1:8082/create-room');
       const data = await res.json();
       const code = data.room;
       const createdAt = data.createdAt || new Date().toISOString();
@@ -262,7 +272,7 @@ export const App: React.FC = () => {
         }
       ]);
 
-      await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
+      await StartWSClient("ws://127.0.0.1:8082/ws", code, "capture");
     } catch (err: any) {
       console.error(err);
       showModal("Error", `Failed to add device room: ${err.message || err}`, "error");
@@ -299,7 +309,7 @@ export const App: React.FC = () => {
           if (globalDeviceRooms.length === 0) {
             if (!initialRoomPromise) {
               initialRoomPromise = (async () => {
-                const res = await fetch('http://127.0.0.1:8081/create-room');
+                const res = await fetch('http://127.0.0.1:8082/create-room');
                 const data = await res.json();
                 const code = data.room;
                 const createdAt = data.createdAt || new Date().toISOString();
@@ -311,7 +321,7 @@ export const App: React.FC = () => {
                   createdAt
                 };
                 globalDeviceRooms = [newRoom];
-                await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
+                await StartWSClient("ws://127.0.0.1:8082/ws", code, "capture");
                 return newRoom;
               })();
             }
@@ -746,6 +756,7 @@ export const App: React.FC = () => {
 
   // Trigger file outputs refresh
   const refreshPDFList = async () => {
+    if (isEmbedMode) return; // Wails API unavailable in iframe/embed mode
     try {
       const pdfs = await ListCompiledPDFs();
       setCompiledPDFs(pdfs || []);
@@ -2321,11 +2332,13 @@ export const App: React.FC = () => {
     setWsConnectionState('connecting');
 
     let username = "Windows Device";
-    try {
-      username = await GetSystemUsername();
-    } catch (_) {}
+    if (!isEmbedMode) {
+      try {
+        username = await GetSystemUsername();
+      } catch (_) {}
+    }
 
-    const wsUrl = `ws://${ip}:8081/ws?room=${code}&role=windows&name=${encodeURIComponent(username)}`;
+    const wsUrl = `ws://${ip}:8082/ws?room=${code}&role=windows&name=${encodeURIComponent(username)}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

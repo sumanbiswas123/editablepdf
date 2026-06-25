@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"math/big"
 	"net"
@@ -20,6 +22,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
+
+// appAssets holds the embedded frontend/dist for serving via the HTTP server
+var appAssets embed.FS
+
+// SetAppAssets registers the embedded assets FS so the embedded HTTP server can serve the frontend UI
+func SetAppAssets(a embed.FS) {
+	appAssets = a
+}
 
 // Embedded WS Server definitions
 type WSMessage struct {
@@ -738,13 +748,39 @@ func (a *App) StartEmbeddedWSServer() string {
 		json.NewEncoder(w).Encode(map[string]string{"path": path})
 	})
 
+	// Serve the frontend UI (embedded frontend/dist) at the root '/'.
+	// This allows Nocodex to load the capture-mode UI inside an iframe at http://localhost:8082/
+	if subFS, err := fs.Sub(appAssets, "frontend/dist"); err == nil {
+		fileServer := http.FileServer(http.FS(subFS))
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			// CORS headers so the iframe in Nocodex (different origin) can load resources
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+
+			urlPath := r.URL.Path
+			// SPA fallback: only redirect to index.html for paths with NO file extension
+			// (i.e. navigation routes like "/" or "/some/page", NOT "/assets/foo.js" which should 404)
+			if urlPath != "/" {
+				hasExt := strings.Contains(filepath.Base(urlPath), ".")
+				if !hasExt {
+					// Navigation route — serve index.html
+					r.URL.Path = "/"
+				}
+				// For asset paths (.js/.css etc.), let the file server handle it naturally
+				// (returns 404 if missing, which is correct behavior)
+			}
+			fileServer.ServeHTTP(w, r)
+		})
+	} else {
+		log.Println("[WSServer] Warning: could not create frontend sub-FS:", err)
+	}
+
 	embeddedHTTPServer = &http.Server{
-		Addr:    ":8081",
+		Addr:    ":8082",
 		Handler: mux,
 	}
 
 	go func() {
-		log.Println("Embedded WebSocket Server running on :8081")
+		log.Println("Embedded WebSocket Server running on :8082")
 		if err := embeddedHTTPServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Println("Embedded server ListenAndServe error:", err)
 		}
