@@ -86,8 +86,15 @@ let globalDeviceRooms: any[] = [];
 let initialRoomPromise: Promise<any> | null = null;
 
 export const App: React.FC = () => {
-  // Theme state
+  const isEmbedded = new URLSearchParams(window.location.search).get('mode') === 'embed';
+  const backUrl = new URLSearchParams(window.location.search).get('backUrl') || '';
+
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const themeParam = params.get('theme');
+    if (themeParam === 'light' || themeParam === 'dark') {
+      return themeParam;
+    }
     const saved = localStorage.getItem('app-theme');
     if (saved === 'light') return 'light';
     return 'dark';
@@ -101,6 +108,15 @@ export const App: React.FC = () => {
     }
     return 'capture';
   });
+
+  useEffect(() => {
+    try {
+      window.parent.postMessage({ type: 'wails_app_mode', appMode }, '*');
+    } catch (e) {
+      console.error(e);
+    }
+  }, [appMode]);
+
   const [osPlatform, setOsPlatform] = useState<'darwin' | 'windows' | ''>('');
   
   // Mac Performer details
@@ -471,6 +487,16 @@ export const App: React.FC = () => {
     }
     localStorage.setItem('app-theme', theme);
   }, [theme]);
+
+  // Auto-load directory in embed mode
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    const folder = params.get('folder');
+    if (mode === 'embed' && folder) {
+      onDirectoryLoaded(folder);
+    }
+  }, []);
 
   // Bind legacy global logging functions and window message listener
   useEffect(() => {
@@ -3425,7 +3451,7 @@ export const App: React.FC = () => {
             </p>
           </div>
           <button 
-            onClick={() => OpenBuilderWindow()}
+            onClick={() => isEmbedded ? setAppMode('builder') : OpenBuilderWindow()}
             style={{
               background: 'rgba(255, 255, 255, 0.04)',
               backdropFilter: 'blur(16px)',
@@ -3979,7 +4005,7 @@ export const App: React.FC = () => {
           </button>
 
           <button
-            onClick={() => OpenBuilderWindow()}
+            onClick={() => isEmbedded ? setAppMode('builder') : OpenBuilderWindow()}
             style={{
               backgroundColor: 'transparent',
               border: 'none',
@@ -3990,7 +4016,7 @@ export const App: React.FC = () => {
               textAlign: 'center'
             }}
           >
-            ⚙️ Open Builder Mode (New Window)
+            ⚙️ {isEmbedded ? 'Open Builder Mode' : 'Open Builder Mode (New Window)'}
           </button>
         </div>
       </div>
@@ -4021,7 +4047,31 @@ export const App: React.FC = () => {
         onSleepMsChange={setSleepMs}
         theme={theme}
         toggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-        onOpenStudio={() => setStudioOpen(true)}
+        onOpenStudio={() => {
+          const params = new URLSearchParams(window.location.search);
+          const isEmbedded = params.get('mode') === 'embed';
+          const backUrl = params.get('backUrl');
+          if (isEmbedded) {
+            try {
+              window.parent.postMessage({ type: 'close_wails' }, '*');
+            } catch (e) {
+              console.error(e);
+            }
+            if (backUrl && backUrl !== 'iframe_close') {
+              window.location.href = backUrl;
+            }
+          } else {
+            setStudioOpen(true);
+          }
+        }}
+        onOpenBuilder={() => {
+          if (isEmbedded) {
+            setAppMode('builder');
+          } else {
+            OpenBuilderWindow();
+          }
+        }}
+        onSwitchToCapture={() => setAppMode('capture')}
         appMode={appMode}
       />
 

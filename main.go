@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"flag"
 	"log"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -13,6 +14,14 @@ var assets embed.FS
 func main() {
 	// Create an instance of the app structure
 	appService := NewApp()
+
+	serverFlag := flag.Bool("server", false, "run headless asset and WS server for Nocodex integration")
+	flag.Parse()
+
+	if *serverFlag {
+		runHeadlessServer(appService, 8082)
+		return
+	}
 
 	app := application.New(application.Options{
 		Name: "htmltoepdf",

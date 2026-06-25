@@ -10,6 +10,8 @@ interface HeaderProps {
   theme: 'dark' | 'light';
   toggleTheme: () => void;
   onOpenStudio?: () => void;
+  onOpenBuilder?: () => void;
+  onSwitchToCapture?: () => void;
   appMode?: 'select' | 'builder' | 'capture';
 }
 
@@ -22,6 +24,8 @@ export const Header: React.FC<HeaderProps> = ({
   theme,
   toggleTheme,
   onOpenStudio,
+  onOpenBuilder,
+  onSwitchToCapture,
   appMode
 }) => {
   const [isMac] = useState<boolean>(() => typeof navigator !== 'undefined' && /Mac|Darwin/i.test(navigator.platform));
@@ -247,7 +251,11 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={async () => {
             try {
-              await OpenBuilderWindow();
+              if (onOpenBuilder) {
+                onOpenBuilder();
+              } else {
+                await OpenBuilderWindow();
+              }
             } catch (err) {
               console.error('Failed to open builder window:', err);
             }
@@ -271,6 +279,30 @@ export const Header: React.FC<HeaderProps> = ({
           title="Open Builder in New Window"
         >
           ⚙️ Open Builder
+        </button>
+      )}
+      {appMode === 'builder' && (
+        <button
+          onClick={() => onSwitchToCapture?.()}
+          style={{
+            background: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid rgba(99, 179, 237, 0.35)',
+            color: '#63b3ed',
+            height: '32px',
+            padding: '0 12px',
+            borderRadius: '8px',
+            fontSize: '11px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            transition: 'all var(--transition)'
+          }}
+          className="action-btn"
+          title="Switch to Capture Mode"
+        >
+          <Cpu size={11} /> Capture Mode
         </button>
       )}
       <button

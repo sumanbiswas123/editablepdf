@@ -13,68 +13,102 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
+const isEmbedded = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'embed';
+
+function customCallByID(id: number, ...args: any[]): any {
+    if (isEmbedded) {
+        return fetch('http://localhost:8082/call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, args })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) throw new Error(data.error);
+            return data.result;
+        });
+    }
+    return customCallByID(id, ...args);
+}
+
+function customCallByName(name: string, ...args: any[]): any {
+    if (isEmbedded) {
+        return fetch('http://localhost:8082/call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, args })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) throw new Error(data.error);
+            return data.result;
+        });
+    }
+    return customCallByName(name, ...args);
+}
+
 
 /**
  * AutoCompileDeckPDF compiles all slides to a merged deck PDF and auto-saves to the output directory
  */
 export function AutoCompileDeckPDF(jobs: $models.ExportJob[], sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(560229824, jobs, sleepMs);
+    return customCallByID(560229824, jobs, sleepMs);
 }
 
 /**
  * AutoCompileSlidePDF compiles a single slide to PDF and auto-saves to the output directory
  */
 export function AutoCompileSlidePDF(job: $models.ExportJob, sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(3682724958, job, sleepMs);
+    return customCallByID(3682724958, job, sleepMs);
 }
 
 /**
  * AutomateActiveSlide compiles the base slide, slide references, and all visible dialogue popups/nested references of a single slide folder, merging them into a multi-page sequential slide PDF.
  */
 export function AutomateActiveSlide(slideFolder: string, sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(1618109438, slideFolder, sleepMs);
+    return customCallByID(1618109438, slideFolder, sleepMs);
 }
 
 /**
  * AutomateDeck crawls through all presentation slides in numerical sequence, automatically triggers dynamic dialogs, captures all popup states recursively, and compiles them into a single indexed combined PDF.
  */
 export function AutomateDeck(sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(3355232630, sleepMs);
+    return customCallByID(3355232630, sleepMs);
 }
 
 /**
  * CaptureCustomStateHTML saves interactive outerHTML to a temp file, stripping scripts to freeze dynamic content
  */
 export function CaptureCustomStateHTML(folderName: string, htmlContent: string): $CancellablePromise<string> {
-    return $Call.ByID(348162122, folderName, htmlContent);
+    return customCallByID(348162122, folderName, htmlContent);
 }
 
 /**
  * CleanUpServer shuts down the local server when app closes
  */
 export function CleanUpServer(): $CancellablePromise<void> {
-    return $Call.ByID(3584425128);
+    return customCallByID(3584425128);
 }
 
 /**
  * CleanUpTempHTML deletes the generated temporary HTML state file
  */
 export function CleanUpTempHTML(folderName: string, tempFilename: string): $CancellablePromise<void> {
-    return $Call.ByID(3291743464, folderName, tempFilename);
+    return customCallByID(3291743464, folderName, tempFilename);
 }
 
 /**
  * CombineCompiledPDFs merges all single-slide compiled PDFs in numerical order into a single full presentation deck
  */
 export function CombineCompiledPDFs(): $CancellablePromise<string> {
-    return $Call.ByID(2109371114);
+    return customCallByID(2109371114);
 }
 
 /**
  * CombineCustomPDFs merges a list of PDF filenames/paths in the specified order and injects custom combined metadata JSON
  */
 export function CombineCustomPDFs(filenames: string[], combinedMetadataJSON: string): $CancellablePromise<string> {
-    return $Call.ByID(2640124358, filenames, combinedMetadataJSON);
+    return customCallByID(2640124358, filenames, combinedMetadataJSON);
 }
 
 /**
@@ -82,21 +116,21 @@ export function CombineCustomPDFs(filenames: string[], combinedMetadataJSON: str
  * and compiles them into a single combined deck PDF.
  */
 export function CompileDeckFromCaptures(jobs: $models.ExportJob[], sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(3413885816, jobs, sleepMs);
+    return customCallByID(3413885816, jobs, sleepMs);
 }
 
 /**
  * CompileScreenshot exports a single slide visual screenshot to a PNG file
  */
 export function CompileScreenshot(job: $models.ExportJob, outputPath: string, sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(4192616226, job, outputPath, sleepMs);
+    return customCallByID(4192616226, job, outputPath, sleepMs);
 }
 
 /**
  * CompileSingleStateToPDF renders a single pre-captured state directly to a PDF page within the active session
  */
 export function CompileSingleStateToPDF(job: $models.ExportJob, sleepMs: number): $CancellablePromise<void> {
-    return $Call.ByID(1697637524, job, sleepMs);
+    return customCallByID(1697637524, job, sleepMs);
 }
 
 /**
@@ -104,85 +138,85 @@ export function CompileSingleStateToPDF(job: $models.ExportJob, sleepMs: number)
  * and compiles each into a PDF page, merging them into a single slide PDF.
  */
 export function CompileSlideFromCaptures(jobs: $models.ExportJob[], sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(655608788, jobs, sleepMs);
+    return customCallByID(655608788, jobs, sleepMs);
 }
 
 /**
  * CompileSlidesToIDML extracts exact DOM absolute coordinate elements via chromedp and generates an IDML spread deck
  */
 export function CompileSlidesToIDML(jobs: $models.ExportJob[], outputPath: string, sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(1565557109, jobs, outputPath, sleepMs);
+    return customCallByID(1565557109, jobs, outputPath, sleepMs);
 }
 
 export function CompileSlidesToPDF(jobs: $models.ExportJob[], outputPath: string, sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(2932220729, jobs, outputPath, sleepMs);
+    return customCallByID(2932220729, jobs, outputPath, sleepMs);
 }
 
 export function CompileSlidesToPDFForRoom(roomCode: string, jobs: $models.ExportJob[], outputPath: string, sleepMs: number): $CancellablePromise<string> {
-    return $Call.ByID(2668857607, roomCode, jobs, outputPath, sleepMs);
+    return customCallByID(2668857607, roomCode, jobs, outputPath, sleepMs);
 }
 
 /**
  * DeleteCompiledPDF deletes a compiled PDF from the output directory
  */
 export function DeleteCompiledPDF(filename: string): $CancellablePromise<void> {
-    return $Call.ByID(3987530237, filename);
+    return customCallByID(3987530237, filename);
 }
 
 /**
  * EndPDFSession finishes the session, merges all compiled PDFs, and performs cleanup
  */
 export function EndPDFSession(outputPath: string): $CancellablePromise<string> {
-    return $Call.ByID(760299660, outputPath);
+    return customCallByID(760299660, outputPath);
 }
 
 /**
  * EnsureOutputDir creates the output directory if it doesn't exist
  */
 export function EnsureOutputDir(): $CancellablePromise<string> {
-    return $Call.ByID(2437797033);
+    return customCallByID(2437797033);
 }
 
 /**
  * ExtractPDFMetadata parses a generated PDF file's Title field to retrieve the JSON metadata
  */
 export function ExtractPDFMetadata(filePath: string): $CancellablePromise<string> {
-    return $Call.ByID(3423517369, filePath);
+    return customCallByID(3423517369, filePath);
 }
 
 /**
  * GenerateDeckAutoSavePath generates an auto-save path for the full merged deck PDF
  */
 export function GenerateDeckAutoSavePath(): $CancellablePromise<string> {
-    return $Call.ByID(2882721702);
+    return customCallByID(2882721702);
 }
 
 /**
  * GenerateNextAutoSlidePDFPath returns the next sequential filename for an auto-crawled slide (e.g. slide1_1.pdf, slide1_2.pdf...)
  */
 export function GenerateNextAutoSlidePDFPath(slideIndex: number): $CancellablePromise<string> {
-    return $Call.ByID(1221673002, slideIndex);
+    return customCallByID(1221673002, slideIndex);
 }
 
 /**
  * GenerateNextSequentialPDFPath returns the next sequential PDF file path (e.g. 1.pdf, 2.pdf...) in the output directory
  */
 export function GenerateNextSequentialPDFPath(): $CancellablePromise<string> {
-    return $Call.ByID(113716333);
+    return customCallByID(113716333);
 }
 
 /**
  * GetAssetBase64 reads an asset image and returns it as a Base64 data URI
  */
 export function GetAssetBase64(name: string): $CancellablePromise<string> {
-    return $Call.ByID(59194422, name);
+    return customCallByID(59194422, name);
 }
 
 /**
  * GetLocalIPAddresses retrieves non-loopback local network IPs
  */
 export function GetLocalIPAddresses(): $CancellablePromise<string[]> {
-    return $Call.ByID(3325779953).then(($result: any) => {
+    return customCallByID(3325779953).then(($result: any) => {
         return $$createType0($result);
     });
 }
@@ -191,28 +225,28 @@ export function GetLocalIPAddresses(): $CancellablePromise<string[]> {
  * GetOutputDir returns the output directory path for the current presentation
  */
 export function GetOutputDir(): $CancellablePromise<string> {
-    return $Call.ByID(2496053065);
+    return customCallByID(2496053065);
 }
 
 /**
  * GetPlatform returns the current operating system (windows, darwin, etc)
  */
 export function GetPlatform(): $CancellablePromise<string> {
-    return $Call.ByID(3709063056);
+    return customCallByID(3709063056);
 }
 
 /**
  * IsSingleSlidePDF checks if a filename represents a single sequential slide PDF (e.g. 1.pdf, 2.pdf, slide1_1.pdf)
  */
 export function IsSingleSlidePDF(name: string): $CancellablePromise<boolean> {
-    return $Call.ByID(3146291056, name);
+    return customCallByID(3146291056, name);
 }
 
 /**
  * ListCombinedDecks returns all merged presentation deck PDFs in the output directory
  */
 export function ListCombinedDecks(): $CancellablePromise<$models.CompiledPDF[]> {
-    return $Call.ByID(4020234804).then(($result: any) => {
+    return customCallByID(4020234804).then(($result: any) => {
         return $$createType2($result);
     });
 }
@@ -221,7 +255,7 @@ export function ListCombinedDecks(): $CancellablePromise<$models.CompiledPDF[]> 
  * ListCompiledPDFs returns all single slide compiled PDFs in the output directory
  */
 export function ListCompiledPDFs(): $CancellablePromise<$models.CompiledPDF[]> {
-    return $Call.ByID(4021739937).then(($result: any) => {
+    return customCallByID(4021739937).then(($result: any) => {
         return $$createType2($result);
     });
 }
@@ -230,21 +264,21 @@ export function ListCompiledPDFs(): $CancellablePromise<$models.CompiledPDF[]> {
  * OpenBuilderWindow opens a new window specifically for Builder Mode
  */
 export function OpenBuilderWindow(): $CancellablePromise<void> {
-    return $Call.ByID(2586631480);
+    return customCallByID(2586631480);
 }
 
 /**
  * OpenDirectory opens the output directory in the native file explorer
  */
 export function OpenDirectory(): $CancellablePromise<void> {
-    return $Call.ByID(4113378380);
+    return customCallByID(4113378380);
 }
 
 /**
  * ReadLocalFile reads a file from the local workspace directory and returns its base64 data and mime type.
  */
 export function ReadLocalFile(path: string): $CancellablePromise<{ [_ in string]?: string }> {
-    return $Call.ByID(4016121990, path).then(($result: any) => {
+    return customCallByID(4016121990, path).then(($result: any) => {
         return $$createType3($result);
     });
 }
@@ -253,28 +287,28 @@ export function ReadLocalFile(path: string): $CancellablePromise<{ [_ in string]
  * RebuildCombinedPDF merges split PDF pages in the specified order and injects consolidated metadata
  */
 export function RebuildCombinedPDF(originalFilename: string, pagePaths: string[], pageMetadatas: string[]): $CancellablePromise<string> {
-    return $Call.ByID(1849374071, originalFilename, pagePaths, pageMetadatas);
+    return customCallByID(1849374071, originalFilename, pagePaths, pageMetadatas);
 }
 
 /**
  * RenameCombinedPDF renames a compiled PDF inside the output directory
  */
 export function RenameCombinedPDF(oldFilename: string, newFilename: string): $CancellablePromise<void> {
-    return $Call.ByID(797740134, oldFilename, newFilename);
+    return customCallByID(797740134, oldFilename, newFilename);
 }
 
 /**
  * SaveRemotePDF saves raw base64 PDF bytes into the local compiled output folder
  */
 export function SaveRemotePDF(filename: string, base64Data: string): $CancellablePromise<string> {
-    return $Call.ByID(1013709212, filename, base64Data);
+    return customCallByID(1013709212, filename, base64Data);
 }
 
 /**
  * ScanActiveSlide returns a list of detected items (descriptions/selectors) that will be processed.
  */
 export function ScanActiveSlide(slideFolder: string): $CancellablePromise<string[]> {
-    return $Call.ByID(2744249679, slideFolder).then(($result: any) => {
+    return customCallByID(2744249679, slideFolder).then(($result: any) => {
         return $$createType0($result);
     });
 }
@@ -283,7 +317,7 @@ export function ScanActiveSlide(slideFolder: string): $CancellablePromise<string
  * ScanAndStartServer scans directory for slides and starts the local server
  */
 export function ScanAndStartServer(dirPath: string): $CancellablePromise<$models.ScanResult | null> {
-    return $Call.ByID(4010810328, dirPath).then(($result: any) => {
+    return customCallByID(4010810328, dirPath).then(($result: any) => {
         return $$createType5($result);
     });
 }
@@ -292,63 +326,63 @@ export function ScanAndStartServer(dirPath: string): $CancellablePromise<$models
  * SelectDirectory triggers the folder selector dialog
  */
 export function SelectDirectory(): $CancellablePromise<string> {
-    return $Call.ByID(1735672136);
+    return customCallByID(1735672136);
 }
 
 /**
  * SelectIDMLSavePath triggers a native save file dialog for IDMLs
  */
 export function SelectIDMLSavePath(defaultFilename: string): $CancellablePromise<string> {
-    return $Call.ByID(3277550051, defaultFilename);
+    return customCallByID(3277550051, defaultFilename);
 }
 
 /**
  * SelectPDFFile opens a system dialog to choose a PDF file and returns its path
  */
 export function SelectPDFFile(): $CancellablePromise<string> {
-    return $Call.ByID(119417331);
+    return customCallByID(119417331);
 }
 
 /**
  * SelectSavePath triggers a native save file dialog
  */
 export function SelectSavePath(defaultFilename: string): $CancellablePromise<string> {
-    return $Call.ByID(1300572447, defaultFilename);
+    return customCallByID(1300572447, defaultFilename);
 }
 
 /**
  * SelectScreenshotSavePath triggers a native save file dialog for screenshots
  */
 export function SelectScreenshotSavePath(defaultFilename: string): $CancellablePromise<string> {
-    return $Call.ByID(941428723, defaultFilename);
+    return customCallByID(941428723, defaultFilename);
 }
 
 /**
  * ShareFile returns a local-network URL for a compiled deck PDF
  */
 export function ShareFile(filename: string): $CancellablePromise<string> {
-    return $Call.ByID(3239681846, filename);
+    return customCallByID(3239681846, filename);
 }
 
 /**
  * SplitCombinedPDFToPages splits a combined presentation PDF into single-page PDF files and returns them as a JSON string
  */
 export function SplitCombinedPDFToPages(filename: string): $CancellablePromise<string> {
-    return $Call.ByID(2028511321, filename);
+    return customCallByID(2028511321, filename);
 }
 
 /**
  * StartEmbeddedWSServer starts the websocket server inside the Wails application
  */
 export function StartEmbeddedWSServer(): $CancellablePromise<string> {
-    return $Call.ByID(909006332);
+    return customCallByID(909006332);
 }
 
 /**
  * StartPDFSession initializes a new chromedp session for compiling states on-the-fly
  */
 export function StartPDFSession(): $CancellablePromise<string> {
-    return $Call.ByID(642174649);
+    return customCallByID(642174649);
 }
 
 /**
@@ -356,50 +390,50 @@ export function StartPDFSession(): $CancellablePromise<string> {
  * mode is either "builder" or "capture" and affects behavior.
  */
 export function StartWSClient(serverURL: string, room: string, mode: string): $CancellablePromise<void> {
-    return $Call.ByID(1776640770, serverURL, room, mode);
+    return customCallByID(1776640770, serverURL, room, mode);
 }
 
 /**
  * StopWSClient stops all active running WebSocket clients.
  */
 export function StopWSClient(): $CancellablePromise<void> {
-    return $Call.ByID(927361720);
+    return customCallByID(927361720);
 }
 
 /**
  * StopWSClientForRoom stops the running WebSocket client for a specific room.
  */
 export function StopWSClientForRoom(room: string): $CancellablePromise<void> {
-    return $Call.ByID(745844272, room);
+    return customCallByID(745844272, room);
 }
 
 /**
  * SyncWorkspaceToMac zip-compresses the current project workspace directory and returns it as a Base64 string.
  */
 export function SyncWorkspaceToMac(): $CancellablePromise<string> {
-    return $Call.ByID(330759889);
+    return customCallByID(330759889);
 }
 
 export function RestartRoomTimer(room: string): $CancellablePromise<string> {
-    return $Call.ByName("main.App.RestartRoomTimer", room);
+    return customCallByName("main.App.RestartRoomTimer", room);
 }
 
 export function GetSystemUsername(): $CancellablePromise<string> {
-    return $Call.ByName("main.App.GetSystemUsername");
+    return customCallByName("main.App.GetSystemUsername");
 }
 
 /**
  * ClearSingleSlidePDFs deletes all single slide compiled PDFs from the output directory
  */
 export function ClearSingleSlidePDFs(): $CancellablePromise<void> {
-    return $Call.ByName("main.App.ClearSingleSlidePDFs");
+    return customCallByName("main.App.ClearSingleSlidePDFs");
 }
 
 /**
  * MergePDFsToPath merges a list of PDF files directly to the specified output path
  */
 export function MergePDFsToPath(filenames: string[], outputPath: string): $CancellablePromise<void> {
-    return $Call.ByName("main.App.MergePDFsToPath", filenames, outputPath);
+    return customCallByName("main.App.MergePDFsToPath", filenames, outputPath);
 }
 
 // Private type creation functions
