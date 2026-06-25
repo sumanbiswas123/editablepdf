@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -13,6 +14,21 @@ var assets embed.FS
 func main() {
 	// Create an instance of the app structure
 	appService := NewApp()
+
+	// Check if --server mode is requested
+	isServer := false
+	for _, arg := range os.Args {
+		if arg == "--server" {
+			isServer = true
+			break
+		}
+	}
+
+	if isServer {
+		log.Println("[main] Starting in --server mode (headless)")
+		RunServerMode(appService)
+		return
+	}
 
 	app := application.New(application.Options{
 		Name: "htmltoepdf",
@@ -41,3 +57,4 @@ func main() {
 		log.Fatal("Error:", err.Error())
 	}
 }
+
