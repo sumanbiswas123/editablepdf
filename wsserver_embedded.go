@@ -721,22 +721,6 @@ func (a *App) StartEmbeddedWSServer() string {
 	mux.HandleFunc("/create-room", embeddedServer.handleCreateRoom)
 	mux.HandleFunc("/ws", embeddedServer.handleWS)
 	mux.HandleFunc("/proxy/", embeddedServer.handleProxyRequest)
-	mux.HandleFunc("/combine", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		path, err := a.CombineCompiledPDFs()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"path": path})
-	})
 
 	embeddedHTTPServer = &http.Server{
 		Addr:    ":8081",

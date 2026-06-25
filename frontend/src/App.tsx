@@ -60,16 +60,6 @@ const safeEventsOn = (eventName: string, callback: (data: any) => void): (() => 
   return () => {};
 };
 
-const fetchCombineCompiledPDFs = async (): Promise<string> => {
-  const res = await fetch('http://127.0.0.1:8081/combine', { method: 'POST' });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || 'Stitching failed');
-  }
-  const data = await res.json();
-  return data.path;
-};
-
 
 interface Slide {
   name: string;
@@ -788,7 +778,7 @@ export const App: React.FC = () => {
         detail: 'Executing PDF stitcher engine...'
       });
 
-      await fetchCombineCompiledPDFs();
+      await CombineCompiledPDFs();
 
       setCompilationProgress({
         phase: 'complete',
@@ -2883,7 +2873,7 @@ export const App: React.FC = () => {
           detail: 'Combining compiled PDF slices...'
         });
 
-        await fetchCombineCompiledPDFs();
+        await CombineCompiledPDFs();
 
         setCompilationProgress({
           phase: 'complete',
@@ -2905,7 +2895,7 @@ export const App: React.FC = () => {
           detail: 'Combining compiled PDF slices...'
         });
 
-        await fetchCombineCompiledPDFs();
+        await CombineCompiledPDFs();
 
         setCompilationProgress({
           phase: 'complete',
@@ -3037,7 +3027,7 @@ export const App: React.FC = () => {
           detail: 'Combining compiled PDF slices...'
         });
 
-        await fetchCombineCompiledPDFs();
+        await CombineCompiledPDFs();
 
         setCompilationProgress({
           phase: 'complete',
@@ -3059,7 +3049,7 @@ export const App: React.FC = () => {
           detail: 'Combining compiled PDF slices...'
         });
 
-        await fetchCombineCompiledPDFs();
+        await CombineCompiledPDFs();
 
         setCompilationProgress({
           phase: 'complete',
