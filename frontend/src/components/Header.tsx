@@ -33,10 +33,10 @@ export const Header: React.FC<HeaderProps> = ({
     try {
       // create a room code from server
       const proto = location.protocol === 'https:' ? 'https' : 'http';
-      const res = await fetch(proto + '://' + location.hostname + ':8082/create-room');
+      const res = await fetch(proto + '://' + location.hostname + ':8081/create-room');
       const j = await res.json();
       const room = j.room;
-      const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8082/ws';
+      const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8081/ws';
       await StartWSClient(wsUrl, room, macMode);
       setWsRunning(true);
       if (saveDefault) localStorage.setItem('macDefaultMode', macMode);
@@ -291,10 +291,10 @@ export const Header: React.FC<HeaderProps> = ({
           transition: 'all var(--transition)'
         }}
         className="action-btn"
-        title="Open PDF Studio"
+        title="Open NoCodeX ePDF Studio"
       >
         <Sparkles size={11} />
-        PDF Studio
+        Studio
       </button>
 
       {/* Theme Toggle Button */}

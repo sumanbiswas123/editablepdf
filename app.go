@@ -238,14 +238,9 @@ func (a *App) ServiceName() string {
 func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	a.ctx = ctx
 	a.app = application.Get()
-	
-	// Start the embedded server immediately
-	a.StartEmbeddedWSServer()
-	
 	go func() {
 		<-ctx.Done()
 		a.CleanUpServer()
-		a.CleanUpEmbeddedWSServer()
 	}()
 	return nil
 }
@@ -552,17 +547,11 @@ func (a *App) handleRenderRequestForRoom(wsc *WSConnection, jobsRaw interface{},
 
 // SelectDirectory triggers the folder selector dialog
 func (a *App) SelectDirectory() (string, error) {
-	dialog := a.app.Dialog.OpenFile().
+	dir, err := a.app.Dialog.OpenFile().
 		SetTitle("Select eDA Presentation Root Directory").
 		CanChooseDirectories(true).
-		CanChooseFiles(false)
-	
-	win := a.app.Window.Current()
-	if win != nil {
-		dialog.AttachToWindow(win)
-	}
-	
-	dir, err := dialog.PromptForSingleSelection()
+		CanChooseFiles(false).
+		PromptForSingleSelection()
 	if err != nil {
 		return "", err
 	}
@@ -1120,16 +1109,11 @@ func (a *App) CaptureCustomStateHTML(folderName string, htmlContent string) (str
 
 // SelectScreenshotSavePath triggers a native save file dialog for screenshots
 func (a *App) SelectScreenshotSavePath(defaultFilename string) (string, error) {
-	dialog := a.app.Dialog.SaveFile().
+	return a.app.Dialog.SaveFile().
 		SetMessage("Save Slide Screenshot").
 		SetFilename(defaultFilename).
-		AddFilter("PNG Image (*.png)", "*.png")
-	
-	win := a.app.Window.Current()
-	if win != nil {
-		dialog.AttachToWindow(win)
-	}
-	return dialog.PromptForSingleSelection()
+		AddFilter("PNG Image (*.png)", "*.png").
+		PromptForSingleSelection()
 }
 
 // CompileScreenshot exports a single slide visual screenshot to a PNG file
@@ -1949,30 +1933,20 @@ func decodeJSON(r io.Reader, v interface{}) error {
 
 // SelectIDMLSavePath triggers a native save file dialog for IDMLs
 func (a *App) SelectIDMLSavePath(defaultFilename string) (string, error) {
-	dialog := a.app.Dialog.SaveFile().
+	return a.app.Dialog.SaveFile().
 		SetMessage("Save InDesign Interchange Package").
 		SetFilename(defaultFilename).
-		AddFilter("InDesign Markup Language (*.idml)", "*.idml")
-	
-	win := a.app.Window.Current()
-	if win != nil {
-		dialog.AttachToWindow(win)
-	}
-	return dialog.PromptForSingleSelection()
+		AddFilter("InDesign Markup Language (*.idml)", "*.idml").
+		PromptForSingleSelection()
 }
 
 // SelectSavePath triggers a native save file dialog
 func (a *App) SelectSavePath(defaultFilename string) (string, error) {
-	dialog := a.app.Dialog.SaveFile().
+	return a.app.Dialog.SaveFile().
 		SetMessage("Save Editable PDF").
 		SetFilename(defaultFilename).
-		AddFilter("PDF Files (*.pdf)", "*.pdf")
-	
-	win := a.app.Window.Current()
-	if win != nil {
-		dialog.AttachToWindow(win)
-	}
-	return dialog.PromptForSingleSelection()
+		AddFilter("PDF Files (*.pdf)", "*.pdf").
+		PromptForSingleSelection()
 }
 
 // CleanUpServer shuts down the local server when app closes

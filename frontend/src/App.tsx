@@ -61,7 +61,7 @@ const safeEventsOn = (eventName: string, callback: (data: any) => void): (() => 
 };
 
 const fetchCombineCompiledPDFs = async (): Promise<string> => {
-  const res = await fetch('http://127.0.0.1:8082/combine', { method: 'POST' });
+  const res = await fetch('http://127.0.0.1:8081/combine', { method: 'POST' });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || 'Stitching failed');
@@ -95,10 +95,6 @@ interface CompilationProgress {
 let globalDeviceRooms: any[] = [];
 let initialRoomPromise: Promise<any> | null = null;
 
-// True when the app is loaded inside Nocodex's iframe (?mode=embed).
-// In this mode Wails runtime is NOT available, so all window.go.* calls must be skipped.
-const isEmbedMode = new URLSearchParams(window.location.search).get('mode') === 'embed';
-
 export const App: React.FC = () => {
   // Theme state
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -108,17 +104,14 @@ export const App: React.FC = () => {
   });
 
   // ─── Builder vs Capture Mode states ───
-  const [appMode, setAppMode] = useState<'builder' | 'capture'>(() => {
+  const [appMode, setAppMode] = useState<'select' | 'builder' | 'capture'>(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('mode') === 'builder') {
       return 'builder';
     }
     return 'capture';
   });
-  const [osPlatform, setOsPlatform] = useState<'darwin' | 'windows' | ''>(() => {
-    const isMac = /Mac|iPad|iPhone|iPod/.test(navigator.userAgent || '');
-    return isMac ? 'darwin' : 'windows';
-  });
+  const [osPlatform, setOsPlatform] = useState<'darwin' | 'windows' | ''>('');
   
   // Mac Performer details
   const [macPairingCode, setMacPairingCode] = useState('');
@@ -207,10 +200,9 @@ export const App: React.FC = () => {
   // Fetch Windows Controller IP for routing (with subnet prefix matching to target Mac IP)
   useEffect(() => {
     const fetchWindowsIP = async () => {
-      if (isEmbedMode) return; // Wails API unavailable in iframe mode
       try {
         const ips = await GetLocalIPAddresses();
-        if (ips && Array.isArray(ips) && ips.length > 0) {
+        if (ips && ips.length > 0) {
           let matched = ips[0];
           if (targetMacIP) {
             const macPrefix = targetMacIP.split('.').slice(0, 3).join('.'); // e.g., "192.168.1"
@@ -233,11 +225,6 @@ export const App: React.FC = () => {
   // Detect OS platform
   useEffect(() => {
     const detect = async () => {
-      if (isEmbedMode) {
-        // In embed/iframe mode Wails is unavailable — always Windows (Nocodex runs on Windows)
-        setOsPlatform('windows');
-        return;
-      }
       try {
         const plat = await GetPlatform();
         setOsPlatform(plat.toLowerCase() as 'darwin' | 'windows');
@@ -256,7 +243,7 @@ export const App: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch('http://127.0.0.1:8082/create-room');
+      const res = await fetch('http://127.0.0.1:8081/create-room');
       const data = await res.json();
       const code = data.room;
       const createdAt = data.createdAt || new Date().toISOString();
@@ -272,7 +259,7 @@ export const App: React.FC = () => {
         }
       ]);
 
-      await StartWSClient("ws://127.0.0.1:8082/ws", code, "capture");
+      await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
     } catch (err: any) {
       console.error(err);
       showModal("Error", `Failed to add device room: ${err.message || err}`, "error");
@@ -309,7 +296,7 @@ export const App: React.FC = () => {
           if (globalDeviceRooms.length === 0) {
             if (!initialRoomPromise) {
               initialRoomPromise = (async () => {
-                const res = await fetch('http://127.0.0.1:8082/create-room');
+                const res = await fetch('http://127.0.0.1:8081/create-room');
                 const data = await res.json();
                 const code = data.room;
                 const createdAt = data.createdAt || new Date().toISOString();
@@ -321,7 +308,7 @@ export const App: React.FC = () => {
                   createdAt
                 };
                 globalDeviceRooms = [newRoom];
-                await StartWSClient("ws://127.0.0.1:8082/ws", code, "capture");
+                await StartWSClient("ws://127.0.0.1:8081/ws", code, "capture");
                 return newRoom;
               })();
             }
@@ -756,7 +743,6 @@ export const App: React.FC = () => {
 
   // Trigger file outputs refresh
   const refreshPDFList = async () => {
-    if (isEmbedMode) return; // Wails API unavailable in iframe/embed mode
     try {
       const pdfs = await ListCompiledPDFs();
       setCompiledPDFs(pdfs || []);
@@ -2332,13 +2318,11 @@ export const App: React.FC = () => {
     setWsConnectionState('connecting');
 
     let username = "Windows Device";
-    if (!isEmbedMode) {
-      try {
-        username = await GetSystemUsername();
-      } catch (_) {}
-    }
+    try {
+      username = await GetSystemUsername();
+    } catch (_) {}
 
-    const wsUrl = `ws://${ip}:8082/ws?room=${code}&role=windows&name=${encodeURIComponent(username)}`;
+    const wsUrl = `ws://${ip}:8081/ws?room=${code}&role=windows&name=${encodeURIComponent(username)}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -3216,7 +3200,163 @@ export const App: React.FC = () => {
     refreshPDFList();
   }, []);
 
+  if (appMode === 'select') {
+    return (
+      <div 
+        className="app-container" 
+        style={{ 
+          height: '100vh', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          gap: '40px',
+          background: 'radial-gradient(circle at center, var(--bg-raised) 0%, var(--bg-deep) 100%)',
+          padding: '24px'
+        }}
+      >
+        <div style={{ textAlign: 'center', animation: 'fadeIn 0.5s ease-out' }}>
+          <h1 style={{ 
+            fontSize: '38px', 
+            fontWeight: 800, 
+            background: 'linear-gradient(135deg, var(--text-1) 30%, var(--accent) 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            letterSpacing: '-1px',
+            marginBottom: '10px'
+          }}>
+            NoCodex ePDF Studio
+          </h1>
+          <p style={{ color: 'var(--text-3)', fontSize: '14px', fontWeight: 500 }}>
+            Select your workspace orchestration layout
+          </p>
+        </div>
 
+        <div 
+          style={{ 
+            display: 'flex', 
+            gap: '24px', 
+            maxWidth: '860px', 
+            width: '100%',
+            justifyContent: 'center',
+            animation: 'slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}
+        >
+          {/* Builder Mode Option Card */}
+          <div 
+            onClick={() => setAppMode('builder')}
+            style={{
+              flex: 1,
+              padding: '32px',
+              borderRadius: 'var(--radius-xl)',
+              background: 'rgba(255, 255, 255, 0.015)',
+              border: '1px solid var(--border-1)',
+              cursor: 'pointer',
+              transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              position: 'relative',
+              overflow: 'hidden'
+            }}
+            className="mode-card"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-6px)';
+              e.currentTarget.style.borderColor = 'var(--purple)';
+              e.currentTarget.style.boxShadow = '0 12px 30px rgba(167, 139, 250, 0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'none';
+              e.currentTarget.style.borderColor = 'var(--border-1)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: 'var(--radius-lg)',
+              backgroundColor: 'var(--purple-dim)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--purple)',
+              fontSize: '20px',
+              fontWeight: 'bold'
+            }}>
+              ⚙️
+            </div>
+            <div>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-1)', marginBottom: '8px' }}>
+                Builder Mode
+              </h2>
+              <p style={{ fontSize: '13px', color: 'var(--text-2)', lineHeight: '1.6' }}>
+                Standalone execution engine. Run page captures, crawls, and compile presentation decks locally on this machine using standard headless Chromium engine.
+              </p>
+            </div>
+            <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--purple)', fontWeight: 600 }}>
+              Launch standalone builder ➔
+            </div>
+          </div>
+
+          {/* Capture Mode Option Card */}
+          <div 
+            onClick={() => setAppMode('capture')}
+            style={{
+              flex: 1,
+              padding: '32px',
+              borderRadius: 'var(--radius-xl)',
+              background: 'rgba(255, 255, 255, 0.015)',
+              border: '1px solid var(--border-1)',
+              cursor: 'pointer',
+              transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              position: 'relative',
+              overflow: 'hidden'
+            }}
+            className="mode-card"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-6px)';
+              e.currentTarget.style.borderColor = 'var(--accent)';
+              e.currentTarget.style.boxShadow = '0 12px 30px rgba(0, 242, 254, 0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'none';
+              e.currentTarget.style.borderColor = 'var(--border-1)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: 'var(--radius-lg)',
+              backgroundColor: 'var(--accent-dim)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--accent)',
+              fontSize: '20px',
+              fontWeight: 'bold'
+            }}>
+              🔗
+            </div>
+            <div>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-1)', marginBottom: '8px' }}>
+                Capture Mode
+              </h2>
+              <p style={{ fontSize: '13px', color: 'var(--text-2)', lineHeight: '1.6' }}>
+                Cross-platform orchestrator link. Pair Windows controllers with a macOS Performer to generate high-accuracy Safari-rendered ePDFs seamlessly.
+              </p>
+            </div>
+            <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}>
+              Launch collaborative workspace ➔
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // MAC PERFORMER / VIEWERSHIP VIEW
   if (appMode === 'capture' && osPlatform === 'darwin') {
@@ -3295,13 +3435,7 @@ export const App: React.FC = () => {
             </p>
           </div>
           <button 
-            onClick={() => {
-              if ((window as any)._wails || (window as any).wails) {
-                OpenBuilderWindow();
-              } else {
-                setAppMode('builder');
-              }
-            }}
+            onClick={() => OpenBuilderWindow()}
             style={{
               background: 'rgba(255, 255, 255, 0.04)',
               backdropFilter: 'blur(16px)',
@@ -3855,13 +3989,7 @@ export const App: React.FC = () => {
           </button>
 
           <button
-            onClick={() => {
-              if ((window as any)._wails || (window as any).wails) {
-                OpenBuilderWindow();
-              } else {
-                setAppMode('builder');
-              }
-            }}
+            onClick={() => OpenBuilderWindow()}
             style={{
               backgroundColor: 'transparent',
               border: 'none',
