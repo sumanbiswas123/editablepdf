@@ -352,111 +352,121 @@ export const Canvas: React.FC<CanvasProps> = ({
         padding: '20px 20px 60px 20px'
       }}
     >
-
-
-      {/* Floating Canvas Navbar */}
+      {/* Floating Controls Container */}
       <div
-        className="glass-panel"
         style={{
           position: 'absolute',
           bottom: '20px',
-          left: '46%', // Shifted slightly to the left to balance the added control buttons
+          left: '50%',
           transform: 'translateX(-50%)',
-          borderRadius: '24px',
-          padding: '6px 14px',
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
           zIndex: 100,
-          border: '1px solid rgba(255, 255, 255, 0.25)',
-          background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.02) 50.1%, rgba(255, 255, 255, 0.12) 100%)',
-          backgroundColor: 'var(--bg-glass)',
-          backdropFilter: 'blur(20px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.25), inset 0 1px 1px rgba(255,255,255,0.45), inset 0 -1px 2px rgba(0,0,0,0.1)'
+          width: 'max-content',
+          maxWidth: 'calc(100% - 40px)',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
         }}
       >
-        <button
-          onClick={onPrev}
-          disabled={currentSlideIndex <= 0 || isCompiling}
+        {/* Floating Canvas Navbar */}
+        <div
+          className="glass-panel"
           style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-2)',
-            cursor: 'pointer',
-            padding: '4px',
+            borderRadius: '24px',
+            padding: '6px 14px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'color var(--transition)',
-            position: 'relative'
+            gap: '12px',
+            border: '1px solid rgba(255, 255, 255, 0.25)',
+            background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.02) 50.1%, rgba(255, 255, 255, 0.12) 100%)',
+            backgroundColor: 'var(--bg-glass)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.25), inset 0 1px 1px rgba(255,255,255,0.45), inset 0 -1px 2px rgba(0,0,0,0.1)'
           }}
-          className="nav-btn custom-tooltip"
-          data-tooltip="Shift + P"
-          data-action="prev-slide"
         >
-          <ArrowLeft size={14} />
-        </button>
+          <button
+            onClick={onPrev}
+            disabled={currentSlideIndex <= 0 || isCompiling}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-2)',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'color var(--transition)',
+              position: 'relative'
+            }}
+            className="nav-btn custom-tooltip"
+            data-tooltip="Shift + P"
+            data-action="prev-slide"
+          >
+            <ArrowLeft size={14} />
+          </button>
 
-        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+          <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
 
-        <span style={{
-          fontSize: '11px',
-          color: 'var(--text-2)',
-          fontWeight: 700,
-          fontVariantNumeric: 'tabular-nums',
-          fontFamily: 'var(--font-mono)',
-          letterSpacing: '0.5px'
-         }}>
-          {currentSlideIndex + 1} / {totalSlides}
-        </span>
-        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
-
-        <button
-          onClick={onReload}
-          disabled={isCompiling}
-          style={{
-            background: 'transparent',
-            border: 'none',
+          <span style={{
+            fontSize: '11px',
             color: 'var(--text-2)',
-            cursor: 'pointer',
-            padding: '4px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'color var(--transition)',
-            position: 'relative'
-          }}
-          className="nav-btn custom-tooltip"
-          data-tooltip="Shift + T"
-          data-action="reload-slide"
-        >
-          <RotateCw size={12} />
-        </button>
+            fontWeight: 700,
+            fontVariantNumeric: 'tabular-nums',
+            fontFamily: 'var(--font-mono)',
+            letterSpacing: '0.5px'
+           }}>
+            {currentSlideIndex + 1} / {totalSlides}
+          </span>
+          <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
 
-        <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+          <button
+            onClick={onReload}
+            disabled={isCompiling}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-2)',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'color var(--transition)',
+              position: 'relative'
+            }}
+            className="nav-btn custom-tooltip"
+            data-tooltip="Shift + T"
+            data-action="reload-slide"
+          >
+            <RotateCw size={12} />
+          </button>
 
-        <button
-          onClick={onNext}
-          disabled={currentSlideIndex >= totalSlides - 1 || isCompiling}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-2)',
-            cursor: 'pointer',
-            padding: '4px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'color var(--transition)',
-            position: 'relative'
-          }}
-          className="nav-btn custom-tooltip"
-          data-tooltip="Shift + N"
-          data-action="next-slide"
-        >
-          <ArrowRight size={14} />
-        </button>
+          <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
+
+          <button
+            onClick={onNext}
+            disabled={currentSlideIndex >= totalSlides - 1 || isCompiling}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-2)',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'color var(--transition)',
+              position: 'relative'
+            }}
+            className="nav-btn custom-tooltip"
+            data-tooltip="Shift + N"
+            data-action="next-slide"
+          >
+            <ArrowRight size={14} />
+          </button>
  
          <div style={{ width: '1px', height: '14px', backgroundColor: 'var(--border-2)' }} />
  
@@ -539,16 +549,11 @@ export const Canvas: React.FC<CanvasProps> = ({
            data-tooltip="Shift + H"
            data-action="capture-swimlane"
            style={{
-             position: 'absolute',
-             bottom: '20px',
-             left: 'calc(46% + 350px)',
-             transform: 'translateX(-50%)',
              borderRadius: '24px',
              padding: '10px 22px',
              display: 'flex',
              alignItems: 'center',
              justifyContent: 'center',
-             zIndex: 100,
              border: '1px solid rgba(255, 255, 255, 0.25)',
              background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.02) 50.1%, rgba(255, 255, 255, 0.12) 100%)',
              backgroundColor: 'var(--bg-glass)',
