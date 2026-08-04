@@ -690,8 +690,22 @@ export const App: React.FC = () => {
       setCurrentSlideIndex(-1);
 
       if (result.slides.length > 0) {
-        // Load first slide
-        setCurrentSlideIndex(0);
+        // Load active slide passed from Nocode X if available, otherwise fallback to the first slide
+        let matchedIdx = 0;
+        const params = new URLSearchParams(window.location.search);
+        const activeSlideParam = params.get('activeSlide');
+        if (activeSlideParam) {
+          const cleanParam = activeSlideParam.replace(/^_+|_+$/g, '').toLowerCase();
+          const found = result.slides.findIndex(s => {
+            const cleanFolder = (s.folderName || '').replace(/^_+|_+$/g, '').toLowerCase();
+            const cleanName = (s.name || '').replace(/^_+|_+$/g, '').toLowerCase();
+            return cleanParam.includes(cleanFolder) || cleanParam.includes(cleanName) || cleanFolder.includes(cleanParam) || cleanName.includes(cleanParam);
+          });
+          if (found !== -1) {
+            matchedIdx = found;
+          }
+        }
+        setCurrentSlideIndex(matchedIdx);
       }
 
       await refreshPDFList();
@@ -3188,6 +3202,13 @@ export const App: React.FC = () => {
   // Load Initial Lists on mount
   useEffect(() => {
     refreshPDFList();
+
+    const params = new URLSearchParams(window.location.search);
+    const folderParam = params.get('folder');
+    if (folderParam) {
+      console.log('Autoloading folder from query param:', folderParam);
+      onDirectoryLoaded(folderParam);
+    }
   }, []);
 
   if (appMode === 'select') {
